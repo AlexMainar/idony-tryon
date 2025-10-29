@@ -2,7 +2,7 @@
   "name": "idony-tryon",
   "version": "1.0.0",
   "description": "",
-  "main": "tailwind.config.js",
+  "main": "index.js",
   "directories": {
     "lib": "lib"
   },
