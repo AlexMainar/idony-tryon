@@ -1,3 +1,34 @@
-[00:00:01.607] Server  LOG     
-[00:00:01.607] Server  LOG        We detected TypeScript in your project and created a tsconfig.json file for you.
-[00:00:01.669] Server  LOG      ✓ Ready in 1486ms
+[00:00:00.556] Server  LOG      ✓ Ready in 337ms
+[00:00:01.605] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[00:00:01.789] Browser WARN    W1103 10:30:50.033000 1922656 face_landmarker_graph.cc:180] Sets FaceBlendshapesGraph acceleration to xnnpack by default.
+[00:00:01.789] Browser LOG     I1103 10:30:50.050000 1922656 gl_context.cc:386] GL version: 3.0 (OpenGL ES 3.0 (WebGL 2.0 (OpenGL ES 3.0 Chromium))), renderer: WebKit WebGL
+[00:00:01.789] Browser WARN    W1103 10:30:50.051000 1922656 gl_context.cc:1072] OpenGL error checking is disabled
+[00:00:01.789] Browser LOG     Graph successfully started running.
+[00:00:02.076] Browser ERROR   INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+[00:00:02.076] Browser WARN    W1103 10:30:50.320000 1922656 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[00:00:02.076] Browser WARN    W1103 10:30:50.329000 1922656 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[00:00:08.699] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[00:00:08.872] Browser WARN    W1103 10:30:57.119000 1922656 face_landmarker_graph.cc:180] Sets FaceBlendshapesGraph acceleration to xnnpack by default.
+[00:00:08.872] Browser LOG     I1103 10:30:57.136000 1922656 gl_context.cc:386] GL version: 3.0 (OpenGL ES 3.0 (WebGL 2.0 (OpenGL ES 3.0 Chromium))), renderer: WebKit WebGL
+[00:00:08.873] Browser WARN    W1103 10:30:57.136000 1922656 gl_context.cc:1072] OpenGL error checking is disabled
+[00:00:08.873] Browser LOG     Graph successfully started running.
+[00:00:09.155] Browser ERROR   INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+[00:00:09.155] Browser WARN    W1103 10:30:57.410000 1922656 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[00:00:09.155] Browser WARN    W1103 10:30:57.418000 1922656 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[00:08:30.467] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[00:08:30.707] Browser WARN    W1103 10:39:18.938000 1922656 face_landmarker_graph.cc:180] Sets FaceBlendshapesGraph acceleration to xnnpack by default.
+[00:08:30.707] Browser LOG     I1103 10:39:18.970000 1922656 gl_context.cc:386] GL version: 3.0 (OpenGL ES 3.0 (WebGL 2.0 (OpenGL ES 3.0 Chromium))), renderer: WebKit WebGL
+[00:08:30.707] Browser WARN    W1103 10:39:18.971000 1922656 gl_context.cc:1072] OpenGL error checking is disabled
+[00:08:30.708] Browser LOG     Graph successfully started running.
+[00:08:32.110] Browser ERROR   INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+[00:08:32.110] Browser WARN    W1103 10:39:20.366000 1922656 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[00:08:32.110] Browser WARN    W1103 10:39:20.377000 1922656 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[00:22:12.594] Server  LOG      ✓ Compiled in 3ms
+[00:23:43.948] Server  LOG      ✓ Compiled in 4ms
+[00:23:44.204] Browser WARN    W1103 10:54:32.378000 1922656 face_landmarker_graph.cc:180] Sets FaceBlendshapesGraph acceleration to xnnpack by default.
+[00:23:44.204] Browser LOG     I1103 10:54:32.406000 1922656 gl_context.cc:386] GL version: 3.0 (OpenGL ES 3.0 (WebGL 2.0 (OpenGL ES 3.0 Chromium))), renderer: WebKit WebGL
+[00:23:44.204] Browser WARN    W1103 10:54:32.407000 1922656 gl_context.cc:1072] OpenGL error checking is disabled
+[00:23:44.204] Browser LOG     Graph successfully started running.
+[00:23:44.204] Browser ERROR   INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+[00:23:44.204] Browser WARN    W1103 10:54:32.462000 1922656 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+[00:23:44.204] Browser WARN    W1103 10:54:32.472000 1922656 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
