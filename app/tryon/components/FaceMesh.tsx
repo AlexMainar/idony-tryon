@@ -39,28 +39,45 @@ export default function FaceMeshComponent() {
 
       ctx.drawImage(video, 0, 0, w, h);
 
-      if (results.faceLandmarks && results.faceLandmarks.length > 0) {
-        const landmarks = results.faceLandmarks[0];
+if (results.faceLandmarks && results.faceLandmarks.length > 0) {
+  const landmarks = results.faceLandmarks[0];
 
-        // Lip polygon indices
-        const lipIndices = [
-          61, 185, 40, 39, 37, 0, 267, 269, 270, 409,
-          291, 375, 321, 405, 314, 17, 84, 181, 91, 146,
-        ];
+  // Outer lips — your existing good mask
+  const outerLip = [
+    61, 185, 40, 39, 37, 0, 267, 269, 270, 409,
+    291, 375, 321, 405, 314, 17, 84, 181, 91, 146,
+  ];
 
-        ctx.beginPath();
-        lipIndices.forEach((index, i) => {
-          const p = landmarks[index];
-          const x = p.x * w;
-          const y = p.y * h;
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        });
-        ctx.closePath();
-        ctx.fillStyle = "rgba(255, 0, 0, 0.7)";
-        ctx.fill();
-      }
+  // Inner mouth hole (smaller inner loop)
+  const innerMouth = [
+  78, 191, 80, 81, 82, 13, 312, 311, 310, 415,
+  308, 324, 318, 402, 317, 14, 87, 178, 88, 95,
+];
 
+  ctx.beginPath();
+
+  // Outer ring
+  outerLip.forEach((i, idx) => {
+    const p = landmarks[i];
+    const x = p.x * w;
+    const y = p.y * h;
+    if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.closePath();
+
+  // Inner mouth ring — this will *subtract* the hole
+  innerMouth.forEach((i, idx) => {
+    const p = landmarks[i];
+    const x = p.x * w;
+    const y = p.y * h;
+    if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.closePath();
+
+  // Fill outer minus inner (no white hole, just transparent mouth)
+  ctx.fillStyle = "rgba(255, 0, 0, 0.7)";
+  ctx.fill("evenodd");
+}
       ctx.restore();
       requestAnimationFrame(detectFace);
     };
