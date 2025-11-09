@@ -13,8 +13,14 @@
     "incremental": true,
     "module": "esnext",
     "esModuleInterop": true,
-    "moduleResolution": "node",
     "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "*"
+      ]
+    },
+    "moduleResolution": "node",
     "isolatedModules": true,
     "jsx": "react-jsx",
     "plugins": [
