@@ -1,302 +1,195 @@
 "use client";
-import React, { useRef, useEffect, useState } from "react";
-import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
-import products from "@/data/products.json";
+import React, { useRef, useEffect, useState, useCallback } from "react";
+import type { FaceLandmarker } from "@mediapipe/tasks-vision";
+import productsCatalog from "@/data/products.json";
+import { initFaceLandmarker } from "@/lib/face/detectLandmarks";
+import { applyTone } from "@/lib/render/applyTone";
+import {
+    hexToRgba,
+    resolveProductToneData,
+    ProductToneData,
+    ProductToneDefinition
+} from "@/lib/utils";
+import CameraFeed from "./CameraFeed";
+import MakeupOverlay from "./MakeupOverlay";
+import Controls from "./Controls";
 
+interface FaceMeshProps {
+    product: any;
+    selectedVariant?: string | null;
+}
 
-// Helper — convert hex colors like "#af4c76" → "rgba(175,76,118,0.6)"
-const hexToRgba = (hex: string, opacity: number) => {
-    const clean = hex.replace("#", "");
-    const bigint = parseInt(clean, 16);
-    const r = (bigint >> 16) & 255;
-    const g = (bigint >> 8) & 255;
-    const b = bigint & 255;
-    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-};
+const productCatalog = productsCatalog as Record<string, ProductToneDefinition>;
+const CANVAS_WIDTH = 640;
+const CANVAS_HEIGHT = 480;
 
-export default function FaceMeshComponent() {
-    // Refs → connect React to real HTML elements (video + canvas)
+export default function FaceMeshComponent({ product, selectedVariant }: FaceMeshProps) {
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const landmarkerRef = useRef<FaceLandmarker | null>(null);
+    const lastVideoTimeRef = useRef(-1);
+    const zoomRef = useRef(1);
 
-    // State
     const [zoom, setZoom] = useState(1);
     const [isCameraOn, setIsCameraOn] = useState(true);
-    const [productData, setProductData] = useState<any>(null); // stores the product from JSON
+    const [isStreamReady, setIsStreamReady] = useState(false);
+    const [productData, setProductData] = useState<ProductToneData | null>(null);
 
-    // Variables for face detection
-    let faceLandmarker: FaceLandmarker | null = null;
-    let lastVideoTime = -1;
-
-    // -------------------------------------------------------------
-    // 🧭 1️⃣ STEP 1: Read product name from the URL & Load the product JSON file from /data
-    // -------------------------------------------------------------
     useEffect(() => {
-        const params = new URLSearchParams(window.location.search);
-        const productKey = params.get("product");
-        if (!productKey) return;
+        zoomRef.current = zoom;
+    }, [zoom]);
 
-        const product = (products as any)[productKey];
-        if (product) setProductData(product);
-        else console.warn(`❌ Product ${productKey} not found in products.json`);
-        console.log("Loaded product:", productKey, product);
-
-    }, []);
-    // -------------------------------------------------------------
-    // 🎥 3️⃣ STEP 3: When productData is ready → start face tracking
-    // -------------------------------------------------------------
     useEffect(() => {
-        if (!productData) return; // wait until JSON has loaded
+  const resolved = resolveProductToneData(product, productCatalog, selectedVariant);
+  if (resolved) setProductData(resolved);
+  else {
+    console.warn("⚠️ No matching product tone data for", selectedVariant);
+    setProductData(null);
+  }
+}, [product, selectedVariant]);
+
+    useEffect(() => {
+        if (!productData || !isStreamReady) return;
 
         let isMounted = true;
+        let animationFrameId: number | null = null;
 
-        // Core loop → detect face and render makeup every frame
         const detectFace = async () => {
-            // Stop if camera or component isn't ready
-            if (!isMounted || !faceLandmarker || !videoRef.current || !canvasRef.current)
-                return;
-
-            const video = videoRef.current;
-            const canvas = canvasRef.current;
-            const ctx = canvas.getContext("2d");
-            if (!ctx) return;
-
-            // Skip duplicate frames
-            if (video.currentTime === lastVideoTime) {
-                requestAnimationFrame(detectFace);
+            if (
+                !isMounted ||
+                !videoRef.current ||
+                !canvasRef.current ||
+                !landmarkerRef.current
+            ) {
                 return;
             }
-            lastVideoTime = video.currentTime;
 
-            // -------------------------------------------------------------
-            // 🧠 STEP 4: Run MediaPipe’s AI model to find facial landmarks
-            // -------------------------------------------------------------
-            const results = await faceLandmarker.detectForVideo(video, performance.now());
+            const video = videoRef.current;
 
-            // Clean canvas each frame and draw the current video frame
+            if (video.currentTime === lastVideoTimeRef.current) {
+                animationFrameId = requestAnimationFrame(detectFace);
+                return;
+            }
+            lastVideoTimeRef.current = video.currentTime;
+
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) {
+                animationFrameId = requestAnimationFrame(detectFace);
+                return;
+            }
+
+            const results = await landmarkerRef.current.detectForVideo(
+                video,
+                performance.now()
+            );
+
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.save();
 
-            // Apply zoom (if user pressed + or -)
-            const w = canvas.width;
-            const h = canvas.height;
+            const { width: w, height: h } = canvas;
             ctx.translate(w / 2, h / 2);
-            ctx.scale(zoom, zoom);
+            ctx.scale(zoomRef.current, zoomRef.current);
             ctx.translate(-w / 2, -h / 2);
+            ctx.drawImage(video, 0, 0, w, h);
 
-            ctx.drawImage(video, 0, 0, w, h); // draw camera feed behind
+            // 🧩 Step 1: Debug logs
+            // 🧩 Step 1: Debug logs (once every second)
+            const now = Date.now();
+            const lastLogTime = (window as any).__lastLogTime || 0;
 
-            // -------------------------------------------------------------
-            // 🧩 STEP 5: Draw makeup masks from productData
-            // -------------------------------------------------------------
+            if (now - lastLogTime > 1000) {
+                console.log("🧠 productData passed to applyTone:", productData);
+                console.log("🎯 productData.regions:", productData?.regions);
+                console.log("🧍‍♂️ landmarks length:", results.faceLandmarks?.[0]?.length);
+                (window as any).__lastLogTime = now;
+            }
+            
             if (results.faceLandmarks && results.faceLandmarks.length > 0) {
-                const landmarks = results.faceLandmarks[0]; // array of 468 face points
-                const color = hexToRgba(productData.color, productData.opacity); // e.g. rgba(175,76,118,0.6)
-
-                Object.keys(productData.regions).forEach((regionName) => {
-                    const region = productData.regions[regionName];
-
-                    // 🪞 Auto-mirror cheeks if only one side exists
-                    if (regionName === "cheeks" && !productData.regions["cheeks_mirror"]) {
-                        // Estimate mirrored indices (MediaPipe face symmetry is around index ~168)
-                        const mirrored = region.map((i: number) => {
-                            const mirrorIndex = 454 - i; // approximate mirror across the nose axis
-                            return mirrorIndex > 0 ? mirrorIndex : i;
-                        });
-                        productData.regions["cheeks_mirror"] = mirrored;
-                        // Draw the mirrored cheek immediately
-                        const indices = mirrored;
-                        const centerX = indices.reduce((sum, i) => sum + landmarks[i].x * w, 0) / indices.length;
-                        const centerY = indices.reduce((sum, i) => sum + landmarks[i].y * h, 0) / indices.length;
-                        const radius = 70;
-
-                        const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
-                        gradient.addColorStop(0, color);
-                        gradient.addColorStop(1, "transparent");
-
-                        ctx.globalCompositeOperation = "multiply";
-                        ctx.filter = "blur(10px)";
-                        ctx.fillStyle = gradient;
-                        ctx.beginPath();
-                        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-                        ctx.fill();
-
-                        ctx.filter = "none";
-                        ctx.globalCompositeOperation = "source-over";
-                    }
-
-
-                    // --- LIPS: handle as one combined path (outer minus inner) ---
-                    if (regionName === "lips_inner") {
-                        // Do not render inner by itself; it will be subtracted when drawing lips_outer.
-                        return;
-                    }
-                    if (regionName === "lips_outer") {
-                        const outer: number[] = productData.regions["lips_outer"];
-                        const inner: number[] | undefined = productData.regions["lips_inner"];
-
-                        ctx.beginPath();
-
-                        // Outer ring
-                        outer.forEach((i: number, idx: number) => {
-                            const p = landmarks[i];
-                            const x = p.x * w;
-                            const y = p.y * h;
-                            if (idx === 0) ctx.moveTo(x, y);
-                            else ctx.lineTo(x, y);
-                        });
-                        ctx.closePath();
-
-                        // Inner ring (mouth opening) — subtract from outer using even-odd
-                        if (inner && inner.length) {
-                            inner.forEach((i: number, idx: number) => {
-                                const p = landmarks[i];
-                                const x = p.x * w;
-                                const y = p.y * h;
-                                if (idx === 0) ctx.moveTo(x, y);
-                                else ctx.lineTo(x, y);
-                            });
-                            ctx.closePath();
-                            ctx.fillStyle = color;
-                            ctx.fill("evenodd");
-                        } else {
-                            // Fallback: no inner ring available
-                            ctx.fillStyle = color;
-                            ctx.fill();
-                        }
-                        return; // lips handled; skip generic drawing
-                    }
-
-                    // --- GENERIC REGIONS (cheeks, nose, eyelids, etc.) ---
-                    // Some regions (like eyelids) may be arrays of arrays (left/right)
-                    const polygons = Array.isArray(region[0]) ? region : [region];
-
-                    polygons.forEach((indices: number[]) => {
-                        // Compute center point of region
-                        const centerX = indices.reduce((sum, i) => sum + landmarks[i].x * w, 0) / indices.length;
-                        const centerY = indices.reduce((sum, i) => sum + landmarks[i].y * h, 0) / indices.length;
-
-                        // Adjust radius per region for realism
-                        const radius = regionName.includes("cheek") ? 70 : regionName.includes("nose") ? 40 : 50;
-
-                        // Create gradient
-                        const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
-                        gradient.addColorStop(0, color);
-                        gradient.addColorStop(1, "transparent");
-
-                        // Apply blending and blur to simulate natural makeup
-                        ctx.globalCompositeOperation = "multiply";
-                        ctx.filter = "blur(10px)";
-                        ctx.globalAlpha = 1.2 * productData.opacity; // boost intensity slightly
-                        ctx.fillStyle = gradient;
-                        ctx.beginPath();
-                        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-                        ctx.fill();
-
-                        // Reset filters for next region
-                        ctx.globalAlpha = 1;
-                        ctx.filter = "none";
-                        ctx.globalCompositeOperation = "source-over";
-                    });
-                });
+                applyTone(ctx, results.faceLandmarks[0], productData, w, h, hexToRgba);
             }
 
             ctx.restore();
-            requestAnimationFrame(detectFace); // run again for next frame
+            animationFrameId = requestAnimationFrame(detectFace);
         };
 
-        // -------------------------------------------------------------
-        // 🚀 STEP 6: Initialize MediaPipe + Camera
-        // -------------------------------------------------------------
-        async function init() {
+        const init = async () => {
             try {
-                const vision = await FilesetResolver.forVisionTasks("http://localhost:3000/mediapipe");
-                faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-                    baseOptions: { modelAssetPath: "/mediapipe/face_landmarker.task" },
-                    runningMode: "VIDEO",
-                    numFaces: 1
-                });
-
-                // Start camera and loop
-                if (videoRef.current) {
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: "user" }
-                    });
-                    videoRef.current.srcObject = stream;
-                    await videoRef.current.play();
-                    requestAnimationFrame(detectFace);
+                if (!landmarkerRef.current) {
+                    landmarkerRef.current = await initFaceLandmarker();
                 }
-            } catch (err) {
-                console.error("❌ FaceMesh init failed:", err);
+                detectFace();
+            } catch (error) {
+                console.error("❌ FaceMesh init failed:", error);
             }
-        }
+        };
 
         init();
 
-        // Clean up when leaving page
         return () => {
             isMounted = false;
+            if (animationFrameId !== null) {
+                cancelAnimationFrame(animationFrameId);
+            }
         };
-    }, [productData, zoom]); // runs when product or zoom changes
+    }, [isStreamReady]);
 
-    // -------------------------------------------------------------
-    // UI Controls
-    // -------------------------------------------------------------
-    const stopCamera = () => {
-        if (videoRef.current?.srcObject) {
-            const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
-            tracks.forEach((track) => track.stop());
-            setIsCameraOn(false);
-        }
-    };
+    const handleStreamReady = useCallback(() => {
+        setIsStreamReady(true);
+        lastVideoTimeRef.current = -1;
+    }, []);
 
-    const closeTryOn = () => {
+    const handleStreamStopped = useCallback(() => {
+        setIsStreamReady(false);
+    }, []);
+
+    const stopCamera = useCallback(() => {
+        setIsCameraOn(false);
+        setIsStreamReady(false);
+    }, []);
+
+    const closeTryOn = useCallback(() => {
         stopCamera();
         window.location.href = "/";
-    };
+    }, [stopCamera]);
 
-    const zoomIn = () => setZoom((z) => Math.min(z + 0.1, 2));
-    const zoomOut = () => setZoom((z) => Math.max(z - 0.1, 0.8));
+    const zoomIn = useCallback(
+        () => setZoom((z) => Math.min(z + 0.1, 2)),
+        []
+    );
+    const zoomOut = useCallback(
+        () => setZoom((z) => Math.max(z - 0.1, 0.8)),
+        []
+    );
 
-    // -------------------------------------------------------------
-    // 🎨 Render HTML structure
-    // -------------------------------------------------------------
     return (
         <div className="flex flex-col items-center justify-center w-full h-screen bg-white relative">
             <div className="relative w-[640px] h-[480px] overflow-hidden rounded-xl shadow-lg">
-                {/* 🎥 Live video feed */}
-                <video
-                    ref={videoRef}
-                    className="absolute top-0 left-0 w-full h-full object-cover"
-                    playsInline
-                    autoPlay
-                    muted
+                <CameraFeed
+                    videoRef={videoRef}
+                    isActive={isCameraOn}
+                    onStreamReady={handleStreamReady}
+                    onStreamStopped={handleStreamStopped}
                 />
-                {/* 🖌️ Canvas overlay for makeup */}
-                <canvas
-                    ref={canvasRef}
-                    width={640}
-                    height={480}
-                    className="absolute top-0 left-0 w-full h-full z-10"
+                <MakeupOverlay
+                    canvasRef={canvasRef}
+                    width={CANVAS_WIDTH}
+                    height={CANVAS_HEIGHT}
+                    className="absolute top-0 left-0 w-full h-full z-10 pointer-events-none"
                 />
-
-                {/* ❌ Close + Zoom Controls */}
-                <button
-                    onClick={closeTryOn}
-                    className="absolute top-3 right-3 bg-white/70 hover:bg-white text-black text-sm px-3 py-1 rounded-md shadow-md"
-                >
-                    ✖️ Cerrar
-                </button>
-
-                <div className="absolute bottom-3 right-3 flex flex-col space-y-2">
-                    <button onClick={zoomIn} className="bg-white/70 hover:bg-white text-black rounded-full w-8 h-8 text-lg shadow">+</button>
-                    <button onClick={zoomOut} className="bg-white/70 hover:bg-white text-black rounded-full w-8 h-8 text-lg shadow">−</button>
-                </div>
+                <Controls
+                    className="absolute inset-0 z-20"
+                    onClose={closeTryOn}
+                    onZoomIn={zoomIn}
+                    onZoomOut={zoomOut}
+                />
             </div>
 
             {!isCameraOn && (
                 <button
-                    onClick={() => window.location.reload()}
+                    onClick={() => {
+                        setIsCameraOn(true);
+                    }}
                     className="mt-6 px-6 py-2 bg-black text-white rounded-md shadow-md hover:bg-gray-800"
                 >
                     🎥 Volver a activar cámara

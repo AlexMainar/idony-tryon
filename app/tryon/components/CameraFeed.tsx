@@ -1,31 +1,89 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
-export default function CameraFeed() {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+interface CameraFeedProps {
+    videoRef: React.RefObject<HTMLVideoElement>;
+    isActive: boolean;
+    onStreamReady?: () => void;
+    onStreamStopped?: () => void;
+    onStreamError?: (error: Error) => void;
+    className?: string;
+    hiddenVideo?: boolean;
+}
 
-  useEffect(() => {
-    async function startCamera() {
-      try {
-        console.log("Requesting camera...");
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-        });
-        console.log("Camera stream started:", stream);
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
+export default function CameraFeed({
+    videoRef,
+    isActive,
+    onStreamReady,
+    onStreamStopped,
+    onStreamError,
+    className,
+    hiddenVideo = false
+}: CameraFeedProps) {
+    useEffect(() => {
+        let stream: MediaStream | null = null;
+        let cancelled = false;
+
+        const cleanupStream = () => {
+            if (stream) {
+                stream.getTracks().forEach((track) => track.stop());
+                stream = null;
+                onStreamStopped?.();
+            }
+            if (videoRef.current) {
+                videoRef.current.srcObject = null;
+            }
+        };
+
+        async function startCamera() {
+            if (!isActive || !videoRef.current) return;
+
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "user" }
+                });
+
+                if (!videoRef.current || cancelled) {
+                    cleanupStream();
+                    return;
+                }
+
+                videoRef.current.srcObject = stream;
+                await videoRef.current.play();
+                onStreamReady?.();
+            } catch (error) {
+                console.error("Error accessing camera:", error);
+                onStreamError?.(error as Error);
+            }
         }
-      } catch (err) {
-        console.error("Error accessing camera:", err);
-      }
-    }
-    startCamera();
-  }, []);
 
-  return (
-    <div className="flex items-center justify-center min-h-screen bg-black">
-      <video ref={videoRef} autoPlay playsInline muted className="max-w-full max-h-[90vh]" />
-    </div>
-  );
+        if (isActive) {
+            startCamera();
+        } else {
+            cleanupStream();
+        }
+
+        return () => {
+            cancelled = true;
+            cleanupStream();
+        };
+    }, [isActive, videoRef, onStreamReady, onStreamStopped, onStreamError]);
+
+    const composedClassName = [
+        className ?? "",
+        hiddenVideo ? "opacity-0 pointer-events-none" : ""
+    ]
+        .join(" ")
+        .trim();
+
+    return (
+        <video
+            ref={videoRef}
+            className={composedClassName}
+            playsInline
+            autoPlay
+            muted
+            aria-hidden={hiddenVideo ? "true" : undefined}
+        />
+    );
 }
