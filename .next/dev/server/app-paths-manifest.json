@@ -1,3 +1,4 @@
 {
+  "/api/shopify/product/route": "app/api/shopify/product/route.js",
   "/tryon/page": "app/tryon/page.js"
 }

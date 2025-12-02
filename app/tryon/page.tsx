@@ -20,11 +20,29 @@ export default function TryOnPage() {
 
     const fetchProduct = async () => {
       try {
-        const res = await fetch(`/api/shopify/product?handle=${handle}`);
+        console.log("🔍 URL params before backend call:");
+        console.log("   → handle:", handle);
+        console.log("   → variant:", urlParams.get("variant"));
+
+        const variant = urlParams.get("variant");
+        const apiUrl = `/api/shopify/product?handle=${encodeURIComponent(handle)}${
+          variant ? `&variant=${encodeURIComponent(variant)}` : ""
+        }`;
+
+        console.log("📡 Fetching from backend:", apiUrl);
+
+        const res = await fetch(apiUrl);
         const data = await res.json();
-        setProduct(data);
+
+        console.log("✅ Backend response:", data);
+        if (data?.product) {
+          setProduct(data.product);
+          if (!variant && data.product?.selectedVariant?.title) {
+            setVariantTitle(data.product.selectedVariant.title);
+          }
+        }
       } catch (error) {
-        console.error("Error fetching product:", error);
+        console.error("❌ Error fetching product:", error);
       } finally {
         setLoading(false);
       }
@@ -33,26 +51,14 @@ export default function TryOnPage() {
     fetchProduct();
   }, []);
 
-  if (loading) {
-    return (
-      <main className="flex flex-col items-center justify-center min-h-screen bg-white text-black">
-        <h1 className="text-xl font-semibold mb-2">Cargando cámara...</h1>
-      </main>
-    );
-  }
-
-  if (!product) {
-    return (
-      <main className="flex flex-col items-center justify-center min-h-screen bg-white text-black">
-        <h1 className="text-xl font-semibold mb-2">Producto no encontrado</h1>
-      </main>
-    );
-  }
+  if (!product) return null;
 
   return (
-    <main className="flex flex-col items-center justify-center min-h-screen bg-white text-black">
-      <h1 className="text-2xl font-bold mb-4">🎨 {product.title}</h1>
-      <FaceMeshComponent product={product.product} selectedVariant={variantTitle} />
+    <main className="w-full h-full bg-black overflow-hidden">
+      <FaceMeshComponent
+        product={product}
+        selectedVariant={variantTitle || product?.selectedVariant?.title || null}
+      />
     </main>
   );
 }

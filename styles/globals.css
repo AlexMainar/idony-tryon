@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+/* Root layout: full-screen app inside iframe */
+html,
+body,
+#app-root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+main {
+  height: 100%;
+  min-height: 100%;
+}
+
+/* Next.js wrapper (if present) – keep it full height */
+div[data-nextjs-scroll-focus-boundary] {
+  height: 100%;
+}
+
+/* Make the direct child of #app-root not clip our canvas/video */
+div[id="app-root"] > div {
+  height: 100%;
+  width: 100%;
+  overflow: visible !important;
+}
+
+/* Camera video: full container, invisible, used only as source for canvas */
+#idony-camera-feed {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  opacity: 0 !important;          /* invisible */
+  pointer-events: none !important;
+  z-index: 1 !important;          /* below canvas */
+}
+
+/* Canvas: always on top, same sizing as video */
+#app-root canvas,
+canvas {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  pointer-events: none !important;
+  z-index: 99999 !important;      /* above video */
+}
+
+/* Prevent Shopify's aspect-ratio tricks from distorting the iframe content */
+#tryon-frame-container,
+#tryon-frame {
+  aspect-ratio: auto !important;
+}

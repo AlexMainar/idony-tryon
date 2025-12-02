@@ -8,7 +8,6 @@ interface CameraFeedProps {
     onStreamStopped?: () => void;
     onStreamError?: (error: Error) => void;
     className?: string;
-    hiddenVideo?: boolean;
 }
 
 export default function CameraFeed({
@@ -17,8 +16,7 @@ export default function CameraFeed({
     onStreamReady,
     onStreamStopped,
     onStreamError,
-    className,
-    hiddenVideo = false
+    className
 }: CameraFeedProps) {
     useEffect(() => {
         let stream: MediaStream | null = null;
@@ -68,22 +66,25 @@ export default function CameraFeed({
             cleanupStream();
         };
     }, [isActive, videoRef, onStreamReady, onStreamStopped, onStreamError]);
+    const showRawFeed =
+        typeof window !== "undefined" &&
+        new URLSearchParams(window.location.search).get("debug") === "true";
 
-    const composedClassName = [
-        className ?? "",
-        hiddenVideo ? "opacity-0 pointer-events-none" : ""
+    const effectiveClassName = [
+        className,                      // from FaceMesh
+        showRawFeed ? "block" : "hidden pointer-events-none",
     ]
-        .join(" ")
-        .trim();
+        .filter(Boolean)
+        .join(" ");
 
     return (
         <video
+            id="idony-camera-feed"
             ref={videoRef}
-            className={composedClassName}
+            className={effectiveClassName}
             playsInline
             autoPlay
             muted
-            aria-hidden={hiddenVideo ? "true" : undefined}
         />
     );
 }

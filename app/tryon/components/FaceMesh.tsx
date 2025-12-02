@@ -1,200 +1,256 @@
 "use client";
-import React, { useRef, useEffect, useState, useCallback } from "react";
+
+import React, {
+  useRef,
+  useEffect,
+  useState,
+  useCallback,
+} from "react";
 import type { FaceLandmarker } from "@mediapipe/tasks-vision";
 import productsCatalog from "@/data/products.json";
 import { initFaceLandmarker } from "@/lib/face/detectLandmarks";
 import { applyTone } from "@/lib/render/applyTone";
 import {
-    hexToRgba,
-    resolveProductToneData,
-    ProductToneData,
-    ProductToneDefinition
+  hexToRgba,
+  resolveProductToneData,
+  ProductToneData,
+  ProductToneDefinition,
 } from "@/lib/utils";
 import CameraFeed from "./CameraFeed";
-import MakeupOverlay from "./MakeupOverlay";
 import Controls from "./Controls";
 
 interface FaceMeshProps {
-    product: any;
-    selectedVariant?: string | null;
+  product: any;
+  selectedVariant?: string | null;
 }
 
-const productCatalog = productsCatalog as Record<string, ProductToneDefinition>;
-const CANVAS_WIDTH = 640;
-const CANVAS_HEIGHT = 480;
+const productCatalog = productsCatalog as Record<
+  string,
+  ProductToneDefinition
+>;
 
-export default function FaceMeshComponent({ product, selectedVariant }: FaceMeshProps) {
-    const videoRef = useRef<HTMLVideoElement | null>(null);
-    const canvasRef = useRef<HTMLCanvasElement | null>(null);
-    const landmarkerRef = useRef<FaceLandmarker | null>(null);
-    const lastVideoTimeRef = useRef(-1);
-    const zoomRef = useRef(1);
+// Canvas fijo y simple
+export default function FaceMeshComponent({
+  product,
+  selectedVariant,
+}: FaceMeshProps) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const landmarkerRef = useRef<FaceLandmarker | null>(null);
+  const lastVideoTimeRef = useRef(-1);
+  const zoomRef = useRef(1);
 
-    const [zoom, setZoom] = useState(1);
-    const [isCameraOn, setIsCameraOn] = useState(true);
-    const [isStreamReady, setIsStreamReady] = useState(false);
-    const [productData, setProductData] = useState<ProductToneData | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [isCameraOn, setIsCameraOn] = useState(true);
+  const [isStreamReady, setIsStreamReady] = useState(false);
+  const [productData, setProductData] =
+    useState<ProductToneData | null>(null);
 
-    useEffect(() => {
-        zoomRef.current = zoom;
-    }, [zoom]);
+  console.log("🧠 FaceMesh mounted — product:", product);
 
-    useEffect(() => {
-  const resolved = resolveProductToneData(product, productCatalog, selectedVariant);
-  if (resolved) setProductData(resolved);
-  else {
-    console.warn("⚠️ No matching product tone data for", selectedVariant);
-    setProductData(null);
-  }
-}, [product, selectedVariant]);
+  // Mantener zoomRef sincronizado (aunque ahora el zoom es mínimo)
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
 
-    useEffect(() => {
-        if (!productData || !isStreamReady) return;
+  // Resolver datos de tono del producto
+  useEffect(() => {
+    if (!product) return;
 
-        let isMounted = true;
-        let animationFrameId: number | null = null;
+    const variantTitle =
+      selectedVariant ||
+      product?.selectedVariant?.title ||
+      product?.variants?.edges?.[0]?.node?.title;
 
-        const detectFace = async () => {
-            if (
-                !isMounted ||
-                !videoRef.current ||
-                !canvasRef.current ||
-                !landmarkerRef.current
-            ) {
-                return;
-            }
+    console.log("🎯 resolveProductToneData inputs:", {
+      product,
+      selectedVariant,
+      variantTitle,
+    });
 
-            const video = videoRef.current;
-
-            if (video.currentTime === lastVideoTimeRef.current) {
-                animationFrameId = requestAnimationFrame(detectFace);
-                return;
-            }
-            lastVideoTimeRef.current = video.currentTime;
-
-            const canvas = canvasRef.current;
-            const ctx = canvas.getContext("2d");
-            if (!ctx) {
-                animationFrameId = requestAnimationFrame(detectFace);
-                return;
-            }
-
-            const results = await landmarkerRef.current.detectForVideo(
-                video,
-                performance.now()
-            );
-
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.save();
-
-            const { width: w, height: h } = canvas;
-            ctx.translate(w / 2, h / 2);
-            ctx.scale(zoomRef.current, zoomRef.current);
-            ctx.translate(-w / 2, -h / 2);
-            ctx.drawImage(video, 0, 0, w, h);
-
-            // 🧩 Step 1: Debug logs
-            // 🧩 Step 1: Debug logs (once every second)
-            const now = Date.now();
-            const lastLogTime = (window as any).__lastLogTime || 0;
-
-            if (now - lastLogTime > 1000) {
-                console.log("🧠 productData passed to applyTone:", productData);
-                console.log("🎯 productData.regions:", productData?.regions);
-                console.log("🧍‍♂️ landmarks length:", results.faceLandmarks?.[0]?.length);
-                (window as any).__lastLogTime = now;
-            }
-            
-            if (results.faceLandmarks && results.faceLandmarks.length > 0) {
-                applyTone(ctx, results.faceLandmarks[0], productData, w, h, hexToRgba);
-            }
-
-            ctx.restore();
-            animationFrameId = requestAnimationFrame(detectFace);
-        };
-
-        const init = async () => {
-            try {
-                if (!landmarkerRef.current) {
-                    landmarkerRef.current = await initFaceLandmarker();
-                }
-                detectFace();
-            } catch (error) {
-                console.error("❌ FaceMesh init failed:", error);
-            }
-        };
-
-        init();
-
-        return () => {
-            isMounted = false;
-            if (animationFrameId !== null) {
-                cancelAnimationFrame(animationFrameId);
-            }
-        };
-    }, [isStreamReady]);
-
-    const handleStreamReady = useCallback(() => {
-        setIsStreamReady(true);
-        lastVideoTimeRef.current = -1;
-    }, []);
-
-    const handleStreamStopped = useCallback(() => {
-        setIsStreamReady(false);
-    }, []);
-
-    const stopCamera = useCallback(() => {
-        setIsCameraOn(false);
-        setIsStreamReady(false);
-    }, []);
-
-    const closeTryOn = useCallback(() => {
-        stopCamera();
-        window.location.href = "/";
-    }, [stopCamera]);
-
-    const zoomIn = useCallback(
-        () => setZoom((z) => Math.min(z + 0.1, 2)),
-        []
-    );
-    const zoomOut = useCallback(
-        () => setZoom((z) => Math.max(z - 0.1, 0.8)),
-        []
+    const resolved = resolveProductToneData(
+      product,
+      productCatalog,
+      product?.selectedVariant || selectedVariant
     );
 
-    return (
-        <div className="flex flex-col items-center justify-center w-full h-screen bg-white relative">
-            <div className="relative w-[640px] h-[480px] overflow-hidden rounded-xl shadow-lg">
-                <CameraFeed
-                    videoRef={videoRef}
-                    isActive={isCameraOn}
-                    onStreamReady={handleStreamReady}
-                    onStreamStopped={handleStreamStopped}
-                />
-                <MakeupOverlay
-                    canvasRef={canvasRef}
-                    width={CANVAS_WIDTH}
-                    height={CANVAS_HEIGHT}
-                    className="absolute top-0 left-0 w-full h-full z-10 pointer-events-none"
-                />
-                <Controls
-                    className="absolute inset-0 z-20"
-                    onClose={closeTryOn}
-                    onZoomIn={zoomIn}
-                    onZoomOut={zoomOut}
-                />
-            </div>
+    if (resolved) {
+      console.log("✅ Matched tone data for", resolved.display_name);
+      console.log("✅ Setting productData:", resolved);
+      setProductData(resolved);
+    } else {
+      console.warn(
+        "⚠️ No matching product tone data for",
+        variantTitle
+      );
+      setProductData(null);
+    }
+  }, [product, selectedVariant]);
 
-            {!isCameraOn && (
-                <button
-                    onClick={() => {
-                        setIsCameraOn(true);
-                    }}
-                    className="mt-6 px-6 py-2 bg-black text-white rounded-md shadow-md hover:bg-gray-800"
-                >
-                    🎥 Volver a activar cámara
-                </button>
-            )}
-        </div>
-    );
+  // Bucle de detección SIMPLE (la versión que funcionaba)
+  useEffect(() => {
+    if (!productData || !isStreamReady) return;
+
+    let isMounted = true;
+    let animationFrameId: number | null = null;
+
+    const detectFace = async () => {
+      if (
+        !isMounted ||
+        !videoRef.current ||
+        !canvasRef.current ||
+        !landmarkerRef.current
+      ) {
+        animationFrameId = requestAnimationFrame(detectFace);
+        return;
+      }
+
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext("2d");
+
+      if (!ctx) {
+        animationFrameId = requestAnimationFrame(detectFace);
+        return;
+      }
+
+      // Esperar a que el vídeo tenga metadata
+      if (!video.videoWidth || !video.videoHeight) {
+        animationFrameId = requestAnimationFrame(detectFace);
+        return;
+      }
+
+      // Opcional: evitar procesar el mismo frame dos veces
+      if (video.currentTime === lastVideoTimeRef.current) {
+        animationFrameId = requestAnimationFrame(detectFace);
+        return;
+      }
+      lastVideoTimeRef.current = video.currentTime;
+
+      // Mantener el canvas con la resolución nativa de la cámara
+      if (
+        canvas.width !== video.videoWidth ||
+        canvas.height !== video.videoHeight
+      ) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
+
+      const results = await landmarkerRef.current.detectForVideo(
+        video,
+        performance.now()
+      );
+
+      // Limpiar y dibujar el frame de cámara 1:1
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // Aplicar maquillaje
+      if (
+        results.faceLandmarks &&
+        results.faceLandmarks.length > 0
+      ) {
+        applyTone(
+          ctx,
+          results.faceLandmarks[0],
+          productData,
+          canvas.width,
+          canvas.height,
+          hexToRgba
+        );
+      }
+
+      animationFrameId = requestAnimationFrame(detectFace);
+    };
+
+    const init = async () => {
+      try {
+        if (!landmarkerRef.current) {
+          landmarkerRef.current = await initFaceLandmarker();
+        }
+        detectFace();
+      } catch (error) {
+        console.error("❌ FaceMesh init failed:", error);
+      }
+    };
+
+    init();
+
+    return () => {
+      isMounted = false;
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, [productData, isStreamReady]);
+
+  // Callbacks de cámara
+  const handleStreamReady = useCallback(() => {
+    setIsStreamReady(true);
+    lastVideoTimeRef.current = -1;
+  }, []);
+
+  const handleStreamStopped = useCallback(() => {
+    setIsStreamReady(false);
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    setIsCameraOn(false);
+    setIsStreamReady(false);
+  }, []);
+
+  const closeTryOn = useCallback(() => {
+    stopCamera();
+    window.location.href = "/";
+  }, [stopCamera]);
+
+  const zoomIn = useCallback(
+    () => setZoom((z) => Math.min(z + 0.1, 2)),
+    []
+  );
+  const zoomOut = useCallback(
+    () => setZoom((z) => Math.max(z - 0.1, 0.8)),
+    []
+  );
+
+  return (
+    <div className="relative w-full h-full rounded-xl overflow-hidden bg-black">
+      <CameraFeed
+        videoRef={videoRef}
+        isActive={isCameraOn}
+        onStreamReady={handleStreamReady}
+        onStreamStopped={handleStreamStopped}
+        className="absolute inset-0 w-full h-full object-cover opacity-0 z-0"
+      />
+
+      <canvas
+      ref={canvasRef}
+      className="
+        absolute 
+        top-1/2 left-1/2 
+        transform -translate-x-1/2 -translate-y-1/2 
+        w-full h-full 
+        object-cover 
+        z-10 
+        pointer-events-none
+      "
+    />
+
+      <Controls
+        className="absolute inset-0 z-20"
+        onClose={closeTryOn}
+        onZoomIn={zoomIn}
+        onZoomOut={zoomOut}
+      />
+
+      {!isCameraOn && (
+        <button
+          onClick={() => setIsCameraOn(true)}
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 px-6 py-2 bg-black text-white rounded-md shadow-md hover:bg-gray-800 z-30"
+        >
+          🎥 Volver a activar cámara
+        </button>
+      )}
+    </div>
+  );
 }
