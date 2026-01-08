@@ -34,6 +34,7 @@ div[id="app-root"] > div {
   width: 100% !important;
   height: 100% !important;
   object-fit: cover !important;
+  object-position: center center !important;
   opacity: 0 !important;          /* invisible */
   pointer-events: none !important;
   z-index: 1 !important;          /* below canvas */
@@ -47,8 +48,18 @@ canvas {
   width: 100% !important;
   height: 100% !important;
   object-fit: cover !important;
+  object-position: center center !important;
   pointer-events: none !important;
-  z-index: 99999 !important;      /* above video */
+  overflow: visible !important;
+ 
+}
+
+/* Controls must be above the canvas */
+[id="app-root"] .controls,
+.controls {
+  position: absolute !important;
+  z-index: 100000 !important;
+  pointer-events: auto !important;
 }
 
 /* Prevent Shopify's aspect-ratio tricks from distorting the iframe content */

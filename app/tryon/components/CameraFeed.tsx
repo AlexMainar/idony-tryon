@@ -21,6 +21,7 @@ export default function CameraFeed({
     useEffect(() => {
         let stream: MediaStream | null = null;
         let cancelled = false;
+        let aspectSent = false;
 
         const cleanupStream = () => {
             if (stream) {
@@ -31,6 +32,20 @@ export default function CameraFeed({
             if (videoRef.current) {
                 videoRef.current.srcObject = null;
             }
+        };
+
+        const postCameraAspect = () => {
+            if (aspectSent || !videoRef.current) return;
+            const { videoWidth, videoHeight } = videoRef.current;
+            if (!videoWidth || !videoHeight) return;
+            aspectSent = true;
+            window.parent?.postMessage(
+                {
+                    type: "TRYON_CAMERA_ASPECT",
+                    aspect: videoWidth / videoHeight
+                },
+                "*"
+            );
         };
 
         async function startCamera() {
@@ -48,6 +63,14 @@ export default function CameraFeed({
 
                 videoRef.current.srcObject = stream;
                 await videoRef.current.play();
+                if (videoRef.current) {
+                    videoRef.current.addEventListener(
+                        "loadedmetadata",
+                        postCameraAspect,
+                        { once: true }
+                    );
+                }
+                postCameraAspect();
                 onStreamReady?.();
             } catch (error) {
                 console.error("Error accessing camera:", error);
@@ -70,8 +93,11 @@ export default function CameraFeed({
         typeof window !== "undefined" &&
         new URLSearchParams(window.location.search).get("debug") === "true";
 
+    const baseClassName =
+        "absolute inset-0 w-full h-full object-contain bg-black";
     const effectiveClassName = [
-        className,                      // from FaceMesh
+        baseClassName,
+        className, // from FaceMesh
         showRawFeed ? "block" : "hidden pointer-events-none",
     ]
         .filter(Boolean)

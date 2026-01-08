@@ -43,10 +43,11 @@ export default function FaceMeshComponent({
   const [zoom, setZoom] = useState(1);
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [isStreamReady, setIsStreamReady] = useState(false);
-  const [productData, setProductData] =
-    useState<ProductToneData | null>(null);
+  const [productData, setProductData] = useState<ProductToneData | null>(null);
 
   console.log("🧠 FaceMesh mounted — product:", product);
+
+  const [activeVariantId, setActiveVariantId] = useState<string | null>(null);
 
   // Mantener zoomRef sincronizado (aunque ahora el zoom es mínimo)
   useEffect(() => {
@@ -87,7 +88,6 @@ export default function FaceMeshComponent({
     }
   }, [product, selectedVariant]);
 
-  // Bucle de detección SIMPLE (la versión que funcionaba)
   useEffect(() => {
     if (!productData || !isStreamReady) return;
 
@@ -136,6 +136,15 @@ export default function FaceMeshComponent({
         canvas.height = video.videoHeight;
       }
 
+      // visible size (critical fix)
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
+
+      // FIX: Mediapipe keeps overwriting canvas styles → force correct stacking
+      canvas.style.zIndex = "10";
+      canvas.style.position = "absolute";
+      canvas.style.pointerEvents = "none";
+
       const results = await landmarkerRef.current.detectForVideo(
         video,
         performance.now()
@@ -143,7 +152,18 @@ export default function FaceMeshComponent({
 
       // Limpiar y dibujar el frame de cámara 1:1
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      
+      const scale = Math.max(
+        canvas.width / video.videoWidth,
+        canvas.height / video.videoHeight
+      );
+      const drawWidth = video.videoWidth * scale;
+      const drawHeight = video.videoHeight * scale;
+      const offsetX = (canvas.width - drawWidth) / 2;
+      const offsetY = (canvas.height - drawHeight) / 2;
+
+      ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
 
       // Aplicar maquillaje
       if (
@@ -184,6 +204,79 @@ export default function FaceMeshComponent({
     };
   }, [productData, isStreamReady]);
 
+useEffect(() => {
+  function handleMessage(event: MessageEvent) {
+    let payload: any = event.data;
+
+    // Shopify or other scripts might send strings; attempt to parse JSON
+    if (typeof payload === "string") {
+      try {
+        payload = JSON.parse(payload);
+      } catch {
+        return;
+      }
+    }
+
+    if (!payload || typeof payload !== "object") return;
+
+    if (payload.type === "COLOR_CHANGED" && payload.variantId) {
+      const incomingVariantId = String(payload.variantId);
+      console.log("💄 Received new variant from Shopify:", incomingVariantId);
+      setActiveVariantId(incomingVariantId);
+    }
+  }
+
+  window.addEventListener("message", handleMessage, false);
+  return () => {
+    window.removeEventListener("message", handleMessage, false);
+  };
+}, []); // 👈 runs once, just sets up the listener in shopify for color swap
+
+// When Shopify sends new variant → update the tone data
+useEffect(() => {
+  if (!activeVariantId || !product) return;
+
+  console.log("🎨 Updating tone for new variant:", activeVariantId);
+
+  const normalizeVariantId = (id: any) => {
+    if (!id) return "";
+    const str = String(id);
+    const match = str.match(/(\d+)$/);
+    return match ? match[1] : str;
+  };
+
+  const targetId = normalizeVariantId(activeVariantId);
+
+  // find the variant object
+  const variantNode =
+    product?.variants?.edges?.find(
+      (v: any) => {
+        const vid = normalizeVariantId(v?.node?.id);
+        return vid === targetId;
+      }
+    )?.node;
+
+  if (!variantNode) {
+    console.warn("⚠️ Variant node not found for ID:", activeVariantId);
+    return;
+  }
+
+  const title = variantNode?.title;
+
+  const resolved = resolveProductToneData(
+    { ...product, selectedVariant: variantNode },
+    productCatalog,
+    variantNode
+  );
+
+  if (resolved) {
+    console.log("✅ Updated tone data:", resolved.display_name);
+    setProductData(resolved);
+  } else {
+    console.warn("⚠️ No tone data found for variant:", title);
+  }
+}, [activeVariantId, product]);
+
   // Callbacks de cámara
   const handleStreamReady = useCallback(() => {
     setIsStreamReady(true);
@@ -214,39 +307,40 @@ export default function FaceMeshComponent({
   );
 
   return (
-    <div className="relative w-full h-full rounded-xl overflow-hidden bg-black">
+    <div className="relative w-full h-full overflow-hidden bg-black">
+      {/* VIDEO (invisible, only used for detection) */}
       <CameraFeed
         videoRef={videoRef}
         isActive={isCameraOn}
         onStreamReady={handleStreamReady}
         onStreamStopped={handleStreamStopped}
-        className="absolute inset-0 w-full h-full object-cover opacity-0 z-0"
+        className="absolute inset-0 w-full h-full object-contain opacity-0 z-0"
       />
 
+      {/* CANVAS (visible layer with makeup) */}
       <canvas
-      ref={canvasRef}
-      className="
-        absolute 
-        top-1/2 left-1/2 
-        transform -translate-x-1/2 -translate-y-1/2 
-        w-full h-full 
-        object-cover 
-        z-10 
-        pointer-events-none
+        ref={canvasRef}
+        className="
+        absolute inset-0
+        w-full h-full
+        pointer-events-none 
+        z-10
       "
-    />
+      />
 
+      {/* CONTROLS (must be ABOVE canvas) */}
       <Controls
-        className="absolute inset-0 z-20"
+        className="controls absolute top-4 right-4 z-50 pointer-events-auto flex items-center gap-3"
         onClose={closeTryOn}
         onZoomIn={zoomIn}
         onZoomOut={zoomOut}
       />
 
+      {/* REACTIVATE CAMERA BUTTON */}
       {!isCameraOn && (
         <button
           onClick={() => setIsCameraOn(true)}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 px-6 py-2 bg-black text-white rounded-md shadow-md hover:bg-gray-800 z-30"
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 px-6 py-2 bg-black text-white rounded-md shadow-md hover:bg-gray-800 z-50"
         >
           🎥 Volver a activar cámara
         </button>
