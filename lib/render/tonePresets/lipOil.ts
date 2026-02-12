@@ -17,14 +17,21 @@ export function renderLipOil(
 
   // --- Per-tone tuning ---
   const toneMap: Record<string, { brightness: number; gloss: number }> = {
-    "Lip Bloom Oil & Tint - Ruby Vice": { brightness: 1.1, gloss: 0.45 },
-    "Lip Bloom Oil & Tint - Clover Club": { brightness: 1.05, gloss: 0.4 },
-    "Lip Bloom Oil & Tint - Barbados": { brightness: 0.95, gloss: 0.35 },
+    "Lip Bloom Oil & Tint - Ruby Vice": { brightness: 1.0, gloss: 0.62 },
+    "Lip Bloom Oil & Tint - Clover Club": { brightness: 1.0, gloss: 0.58 },
+    "Lip Bloom Oil & Tint - Barbados": { brightness: 0.92, gloss: 0.54 },
   };
   const toneSettings =
     toneMap[productData.display_name || ""] || { brightness: 1, gloss: 0.4 };
 
-  const color = hexToRgba(productData.color, productData.opacity * 0.85);
+  const colorDeposit = hexToRgba(
+    productData.color,
+    Math.min(1, productData.opacity * 1.08)
+  );
+  const colorBlend = hexToRgba(
+    productData.color,
+    Math.min(1, productData.opacity * 0.95)
+  );
 
   // --- Build outer & inner paths ---
   const outerPath = new Path2D();
@@ -47,18 +54,31 @@ export function renderLipOil(
   });
   innerPath.closePath();
 
-  // --- 1️⃣ Base layer: soft translucent tint ---
+  // Build a single even-odd path so inner mouth is excluded without punching transparency
+  const lipFillPath = new Path2D();
+  lipFillPath.addPath(outerPath);
+  lipFillPath.addPath(innerPath);
+
+  // --- 1️⃣ Base layers: stronger pigment + natural blend ---
+  ctx.save();
+  ctx.globalCompositeOperation = "source-over";
+  ctx.filter = "blur(1.5px)";
+  ctx.fillStyle = colorDeposit;
+  ctx.fill(lipFillPath, "evenodd");
+  ctx.restore();
+
   ctx.save();
   ctx.globalCompositeOperation = "multiply";
-  ctx.filter = "blur(2px)";
-  ctx.fillStyle = color;
-  ctx.fill(outerPath, "evenodd");
+  ctx.globalAlpha = 0.9;
+  ctx.filter = "blur(1.5px)";
+  ctx.fillStyle = colorBlend;
+  ctx.fill(lipFillPath, "evenodd");
   ctx.restore();
 
   // --- 2️⃣ Brightness correction (simulate undertone reflection) ---
   ctx.save();
   ctx.globalCompositeOperation = "screen";
-  ctx.globalAlpha = 0.15 * toneSettings.brightness;
+  ctx.globalAlpha = 0.11 * toneSettings.brightness;
   const brightGrad = ctx.createRadialGradient(
     width / 2,
     height / 2,
@@ -70,7 +90,7 @@ export function renderLipOil(
   brightGrad.addColorStop(0, "rgba(255,255,255,0.25)");
   brightGrad.addColorStop(1, "transparent");
   ctx.fillStyle = brightGrad;
-  ctx.fill(outerPath, "evenodd");
+  ctx.fill(lipFillPath, "evenodd");
   ctx.restore();
 
   // --- 3️⃣ Gloss layer: upper-lip highlight ---
@@ -86,22 +106,15 @@ export function renderLipOil(
   ctx.filter = "blur(6px)";
   ctx.globalAlpha = toneSettings.gloss;
   ctx.fillStyle = glossGrad;
-  ctx.fill(outerPath);
+  ctx.fill(lipFillPath, "evenodd");
   ctx.restore();
 
-  // --- 4️⃣ Mouth cutout ---
-  ctx.save();
-  ctx.globalCompositeOperation = "destination-out";
-  ctx.fillStyle = "rgba(0,0,0,1)";
-  ctx.fill(innerPath);
-  ctx.restore();
-
-  // --- 5️⃣ Final soft overlay for natural blending ---
+  // --- 4️⃣ Final soft overlay for natural blending ---
   ctx.save();
   ctx.globalCompositeOperation = "soft-light";
   ctx.filter = "blur(2px)";
-  ctx.globalAlpha = 0.2;
-  ctx.fillStyle = color;
-  ctx.fill(outerPath);
+  ctx.globalAlpha = 0.24;
+  ctx.fillStyle = colorBlend;
+  ctx.fill(lipFillPath, "evenodd");
   ctx.restore();
 }

@@ -1,0 +1,212 @@
+{%- comment -%}
+  Renders a media element for the product gallery.
+  Media types include: image, video, external_video and model.
+  Accepts:
+  - media: {Object} Media Liquid object (required)
+  - featured_media: {Object} Media Liquid object (required) - featured media of a given product or variant
+  - img_sizes: {String} - A set of media conditions for `img` sizes attribute (Optional)
+  - image_width: {Number} - Image width on desktop based on section settings
+  - unique: {String} Section id
+  - hide_controls: {Boolean} True or false - Hide video controls
+
+  Usage:
+  {%- for media in product.media -%}
+    {% render 'media', media: media, featured_media: featured_media, unique: unique, hide_controls: hide_controls %}
+  {%- endfor -%}
+{%- endcomment -%}
+
+{%- liquid
+  assign img_sizes = img_sizes | default: ''
+  assign image_widths = image_widths | default: '245, 320, 365, 410, 490, 640, 753, 848, 980, 1024, 1280, 1506, 1696, 1960'
+  assign image_size = '1024x1024'
+  assign image_zoom_size = '2048x2048'
+  assign view_string = 'general.accessibility.view' | t
+  capture media_wrapper_id
+    echo 'FeaturedMedia-' | append: unique | append: '-' | append: media.id
+  endcapture
+
+  assign media_aspect_ratio = media.aspect_ratio
+  unless media_aspect_ratio
+    assign media_aspect_ratio = 1
+  endunless
+  assign media_padding_top = 1 | divided_by: media_aspect_ratio | times: 100 | round: 1
+
+  if section.settings.image_aspect_ratio
+    assign media_padding_top = section.settings.image_aspect_ratio | times: 100 | round: 1
+  endif
+
+  assign controls = true
+  if hide_controls
+    assign controls = false
+  endif
+
+  capture image
+    assign loading = loading | default: 'lazy'
+    assign preload = nil
+    assign fetchpriority = nil
+    assign image_alt = media.alt | strip_html | escape
+
+    if template.name == 'product' and media == featured_media
+      assign loading = 'eager'
+      assign fetchpriority = 'high'
+      assign preload = true
+    endif
+
+    assign sizes = '(min-width: 1400px) ' | append: image_width | append: ', (min-width: 768px) calc((100vw - 40px) * 0.6 - 30px), calc(100vw - 40px)'
+
+    if section_type == 'quickview'
+      case settings.quick_buy_image_layout
+        when 'large'
+          assign sizes = '(min-width: 768px) 315px, calc((100vw - 50px) / 2 - 17px)'
+        when 'small'
+          assign sizes = '(min-width: 768px) 163px, calc((100vw - 50px) / 2 - 17px)'
+      endcase
+      assign image_widths = '150, 300, 315, 330, 360, 480, 540, 630, 720'
+      assign loading = 'eager'
+      assign fetchpriority = 'high'
+    endif
+
+    if img_sizes != ''
+      assign sizes = img_sizes
+    endif
+
+    assign image_id = media.id
+    assign is_simple_img = false
+    if media.media_type != 'image'
+      assign image_id = nil
+      assign is_simple_img = true
+    endif
+
+    render 'image', image: media.preview_image, simple: is_simple_img, widths: image_widths, sizes: sizes, loading: loading, fetchpriority: fetchpriority, preload: preload, id: image_id, alt: image_alt
+  endcapture
+
+  capture media_display
+    case media.media_type
+      when 'external_video'
+        if media.host == 'youtube'
+          echo media | external_video_url: autoplay: true, mute: true, playsinline: true, controls: controls, loop: enable_video_looping, playlist: media.external_id | external_video_tag: loading: 'lazy'
+        else
+          echo media | external_video_url: autoplay: true, muted: true, playsinline: true, controls: controls, loop: enable_video_looping | external_video_tag: loading: 'lazy'
+        endif
+      when 'video'
+        echo media | media_tag: image_size: image_size, class: 'media-video', autoplay: true, muted: true, loop: enable_video_looping, controls: controls
+      when 'model'
+        echo media | model_viewer_tag: image_size: image_size, toggleable: true, data-model-id: media.id
+      else
+        echo media | media_tag: class: 'media-item', image_size: image_size
+    endcase
+  endcapture
+
+  capture deferred_media_classes
+    echo 'product-gallery__media deferred-media'
+    echo ' product-gallery__media--' | append: media.id
+    if media.media_type == 'external_video' or media.media_type == 'video'
+      echo ' product-gallery__media--video'
+    endif
+    if media.media_type == 'model'
+      echo ' product-gallery__media--model'
+    endif
+  endcapture
+-%}
+
+{%- capture interaction_markup -%}
+  <button type="button"
+    class="deferred-media__poster"
+    aria-label="{{ view_string }} {{ image_alt }}"
+    data-deferred-media-button
+  >
+    <span class="deferred-media__poster-button">
+      {%- if media.media_type == 'model' -%}
+        {%- render 'icon-media-model' -%}
+      {%- else -%}
+        {%- render 'icon-media-video' -%}
+      {%- endif -%}
+    </span>
+
+    {{ image }}
+  </button>
+{%- endcapture -%}
+
+<div id="{{ media_wrapper_id }}"
+  class="product-gallery__media-slide{% unless featured_media == media %} media--hidden{% endunless %}"
+  data-product-slide
+  data-id="{{ media.id }}"
+  data-aspectratio="{{ media_aspect_ratio }}"
+  data-media-id="{{ unique }}-{{ media.id }}"
+  data-type="{{ media.media_type }}"
+  {% if media.media_type == 'video' or media.media_type == 'external_video' %}
+    data-video
+    data-video-id="{{ media.id }}"
+    data-enable-video-looping="{{ enable_video_looping }}"
+  {% endif %}
+  {% if media.media_type == 'model' %}
+    data-model
+    data-model-id="{{ media.id }}"
+  {% endif %}
+  {% if media.media_type == 'external_video' %}
+    data-youtube-id="{{ media.external_id }}"
+  {% endif %}
+  data-product-single-media-wrapper>
+  
+{%- if media.media_type == 'image' -%}
+  <div class="product-gallery__media-space" style="--media-padding-top: {{ media_padding_top }}%;">
+    {{ image }}
+
+    {% if product.tags contains "tryon" %}
+      {% assign variant = product.selected_or_first_available_variant %}
+
+      <div class="tryon-overlay">
+        <button 
+          type="button"   
+          class="tryon-button"
+          data-tryon-button
+          data-product-handle="{{ product.handle }}"
+          data-variant-title="{{ variant.title | url_encode }}"
+        >
+          <!-- SVG ICON -->
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" style="margin-right:6px;">
+            <path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"
+              stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M12 6c2.7 0 4.5 2.2 4.5 5v1.5c0 1.2-.3 2.3-.9 3.1l-.4.6c-.3.4-.5.9-.5 1.4v.9c0 .3-.2.5-.5.5h-4c-.3 0-.5-.2-.5-.5v-.9c0-.5-.2-1-.5-1.4l-.4-.6c-.6-.8-.9-1.9-.9-3.1V11c0-2.8 1.8-5 4.5-5z"
+              stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          PRUÉBATELO
+        </button>
+      </div>
+    {% endif %}
+    </div>
+    {%- endif -%}
+
+    {%- if enable_zoom and section_type != 'quickview' -%}
+      <a href="{{ media | image_url: width: 2000 }}"
+        class="product-gallery__media-link"
+        rel="lightbox"
+        data-zoom-wrapper
+        data-image-width="{{ media.width }}"
+        data-image-height="{{ media.height }}">
+        <span class="visually-hidden">{{ 'general.accessibility.product_image_lightbox' | t }}</span>
+      </a>
+  
+    {%- else -%}
+
+    {%- case media.media_type -%}
+      {%- when 'external_video' or 'video' or 'model' -%}
+        <deferred-media class="{{ deferred_media_classes }}"
+          data-deferred-media
+          style="padding-top: {{ media_padding_top }}%;"
+          {% if media.media_type != 'external_video' %} data-loop="{{ enable_video_looping }}"{% endif %}
+        >
+          {{ interaction_markup }}
+
+          <template>
+            {{ media_display }}
+          </template>
+        </deferred-media>
+
+      {%- else -%}
+        <div class="product-gallery__media" style="padding-top: {{ media_padding_top }}%;">
+          {{ media_display }}
+        </div>
+    {%- endcase -%}
+  {%- endif -%}
+</div>

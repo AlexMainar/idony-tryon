@@ -29,6 +29,8 @@ const productCatalog = productsCatalog as Record<
   ProductToneDefinition
 >;
 
+const DEFAULT_CAMERA_ZOOM = 1.24;
+
 // Canvas fijo y simple
 export default function FaceMeshComponent({
   product,
@@ -38,9 +40,11 @@ export default function FaceMeshComponent({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const landmarkerRef = useRef<FaceLandmarker | null>(null);
   const lastVideoTimeRef = useRef(-1);
-  const zoomRef = useRef(1);
+  const zoomRef = useRef(DEFAULT_CAMERA_ZOOM);
+  const productDataRef = useRef<ProductToneData | null>(null);
 
-  const [zoom, setZoom] = useState(1);
+
+  const [zoom, setZoom] = useState(DEFAULT_CAMERA_ZOOM);
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [isStreamReady, setIsStreamReady] = useState(false);
   const [productData, setProductData] = useState<ProductToneData | null>(null);
@@ -48,6 +52,9 @@ export default function FaceMeshComponent({
   console.log("🧠 FaceMesh mounted — product:", product);
 
   const [activeVariantId, setActiveVariantId] = useState<string | null>(null);
+  const [activeVariantTitle, setActiveVariantTitle] = useState<string | null>(
+    null
+  );
 
   // Mantener zoomRef sincronizado (aunque ahora el zoom es mínimo)
   useEffect(() => {
@@ -95,8 +102,9 @@ export default function FaceMeshComponent({
     let animationFrameId: number | null = null;
 
     const detectFace = async () => {
+      if (!isMounted) return;
+
       if (
-        !isMounted ||
         !videoRef.current ||
         !canvasRef.current ||
         !landmarkerRef.current
@@ -149,21 +157,31 @@ export default function FaceMeshComponent({
         video,
         performance.now()
       );
+      if (!isMounted) return;
+
+      const currentProductData = productDataRef.current;
+      if (!currentProductData) {
+        animationFrameId = requestAnimationFrame(detectFace);
+        return;
+      }
 
       // Limpiar y dibujar el frame de cámara 1:1
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      
-      const scale = Math.max(
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const baseScale = Math.max(
         canvas.width / video.videoWidth,
         canvas.height / video.videoHeight
       );
-      const drawWidth = video.videoWidth * scale;
-      const drawHeight = video.videoHeight * scale;
-      const offsetX = (canvas.width - drawWidth) / 2;
-      const offsetY = (canvas.height - drawHeight) / 2;
+      const scale = baseScale * zoomRef.current;
+      const offsetX =
+        (canvas.width - video.videoWidth * scale) / 2;
+      const offsetY =
+        (canvas.height - video.videoHeight * scale) / 2;
 
-      ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
+      ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+      ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+
 
       // Aplicar maquillaje
       if (
@@ -173,13 +191,14 @@ export default function FaceMeshComponent({
         applyTone(
           ctx,
           results.faceLandmarks[0],
-          productData,
-          canvas.width,
-          canvas.height,
+          currentProductData,
+          video.videoWidth,
+          video.videoHeight,
           hexToRgba
         );
       }
 
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       animationFrameId = requestAnimationFrame(detectFace);
     };
 
@@ -202,85 +221,125 @@ export default function FaceMeshComponent({
         cancelAnimationFrame(animationFrameId);
       }
     };
-  }, [productData, isStreamReady]);
+  }, [isStreamReady]);
 
-useEffect(() => {
-  function handleMessage(event: MessageEvent) {
-    let payload: any = event.data;
+  useEffect(() => {
+    productDataRef.current = productData;
+  }, [productData]);
 
-    // Shopify or other scripts might send strings; attempt to parse JSON
-    if (typeof payload === "string") {
-      try {
-        payload = JSON.parse(payload);
-      } catch {
-        return;
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      let payload: any = event.data;
+
+      // Shopify or other scripts might send strings; attempt to parse JSON
+      if (typeof payload === "string") {
+        try {
+          payload = JSON.parse(payload);
+        } catch {
+          return;
+        }
+      }
+
+      if (!payload || typeof payload !== "object") return;
+
+      if (payload.type === "COLOR_CHANGED") {
+        const incomingVariantId = payload.variantId
+          ? String(payload.variantId)
+          : null;
+        const incomingVariantTitle = payload.variantTitle
+          ? String(payload.variantTitle)
+          : null;
+        if (!incomingVariantId && !incomingVariantTitle) return;
+
+        console.log("💄 Received new variant from Shopify:", {
+          id: incomingVariantId,
+          title: incomingVariantTitle,
+        });
+        (window as any).__lastVariant = {
+          id: incomingVariantId,
+          title: incomingVariantTitle,
+        };
+        if (incomingVariantId) setActiveVariantId(incomingVariantId);
+        if (incomingVariantTitle) setActiveVariantTitle(incomingVariantTitle);
+        window.parent?.postMessage(
+          {
+            type: "TRYON_COLOR_ACK",
+            variantId: incomingVariantId,
+            variantTitle: incomingVariantTitle,
+          },
+          "*"
+        );
       }
     }
 
-    if (!payload || typeof payload !== "object") return;
+    window.addEventListener("message", handleMessage, false);
+    return () => {
+      window.removeEventListener("message", handleMessage, false);
+    };
+  }, []); // 👈 runs once, just sets up the listener in shopify for color swap
 
-    if (payload.type === "COLOR_CHANGED" && payload.variantId) {
-      const incomingVariantId = String(payload.variantId);
-      console.log("💄 Received new variant from Shopify:", incomingVariantId);
-      setActiveVariantId(incomingVariantId);
+  // When Shopify sends new variant → update the tone data
+  useEffect(() => {
+    if (!product || (!activeVariantId && !activeVariantTitle)) return;
+
+    console.log("🎨 Updating tone for new variant:", {
+      id: activeVariantId,
+      title: activeVariantTitle,
+    });
+
+    const normalizeVariantId = (id: any) => {
+      if (!id) return "";
+      const str = String(id);
+      const match = str.match(/(\d+)$/);
+      return match ? match[1] : str;
+    };
+
+    const targetId = activeVariantId
+      ? normalizeVariantId(activeVariantId)
+      : "";
+
+    // find the variant object by ID first
+    const variantNode =
+      targetId &&
+      product?.variants?.edges?.find(
+        (v: any) => {
+          const vid = normalizeVariantId(v?.node?.id);
+          return vid === targetId;
+        }
+      )?.node;
+
+    let resolved: ProductToneData | null = null;
+    let title = variantNode?.title || activeVariantTitle || "";
+
+    if (variantNode) {
+      resolved = resolveProductToneData(
+        { ...product, selectedVariant: variantNode },
+        productCatalog,
+        variantNode
+      );
+    } else if (activeVariantTitle) {
+      console.warn("⚠️ Variant node not found for ID:", activeVariantId);
+      resolved = resolveProductToneData(
+        product,
+        productCatalog,
+        activeVariantTitle
+      );
     }
-  }
 
-  window.addEventListener("message", handleMessage, false);
-  return () => {
-    window.removeEventListener("message", handleMessage, false);
-  };
-}, []); // 👈 runs once, just sets up the listener in shopify for color swap
-
-// When Shopify sends new variant → update the tone data
-useEffect(() => {
-  if (!activeVariantId || !product) return;
-
-  console.log("🎨 Updating tone for new variant:", activeVariantId);
-
-  const normalizeVariantId = (id: any) => {
-    if (!id) return "";
-    const str = String(id);
-    const match = str.match(/(\d+)$/);
-    return match ? match[1] : str;
-  };
-
-  const targetId = normalizeVariantId(activeVariantId);
-
-  // find the variant object
-  const variantNode =
-    product?.variants?.edges?.find(
-      (v: any) => {
-        const vid = normalizeVariantId(v?.node?.id);
-        return vid === targetId;
-      }
-    )?.node;
-
-  if (!variantNode) {
-    console.warn("⚠️ Variant node not found for ID:", activeVariantId);
-    return;
-  }
-
-  const title = variantNode?.title;
-
-  const resolved = resolveProductToneData(
-    { ...product, selectedVariant: variantNode },
-    productCatalog,
-    variantNode
-  );
-
-  if (resolved) {
-    console.log("✅ Updated tone data:", resolved.display_name);
-    setProductData(resolved);
-  } else {
-    console.warn("⚠️ No tone data found for variant:", title);
-  }
-}, [activeVariantId, product]);
+    if (resolved) {
+      console.log("✅ Updated tone data:", resolved.display_name);
+      setProductData(resolved);
+    } else {
+      console.warn("⚠️ No tone data found for variant:", title);
+    }
+  }, [activeVariantId, activeVariantTitle, product]);
 
   // Callbacks de cámara
   const handleStreamReady = useCallback(() => {
     setIsStreamReady(true);
     lastVideoTimeRef.current = -1;
+    // 🔔 Tell Shopify: camera + canvas are ready
+    window.parent?.postMessage({ type: "TRYON_READY" }, "*");
   }, []);
 
   const handleStreamStopped = useCallback(() => {
@@ -294,15 +353,15 @@ useEffect(() => {
 
   const closeTryOn = useCallback(() => {
     stopCamera();
-    window.location.href = "/";
+    window.parent?.postMessage({ type: "TRYON_CLOSE" }, "*");
   }, [stopCamera]);
 
   const zoomIn = useCallback(
-    () => setZoom((z) => Math.min(z + 0.1, 2)),
+    () => setZoom((z) => Math.min(z + 0.1, 2.2)),
     []
   );
   const zoomOut = useCallback(
-    () => setZoom((z) => Math.max(z - 0.1, 0.8)),
+    () => setZoom((z) => Math.max(z - 0.1, 1)),
     []
   );
 

@@ -13,7 +13,11 @@ export interface ProductToneData extends ProductToneDefinition {
 }
 
 const normalizeKey = (value?: string | null) =>
-  value?.toLowerCase().replace(/\s+/g, "_").trim() ?? "";
+  value
+    ?.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .trim() ?? "";
 
 /**
  * Some handles include suffixes like `_lipstick` but our JSON keys don't.
@@ -81,9 +85,9 @@ export function resolveProductToneData(
   const productHandle = product?.handle ?? "";
   const baseKey = simplifyProductTitle(productTitle);
   const handleKey = normalizeKey(productHandle);
-  const variantTitle = variantNode?.title?.toLowerCase().replace(/\s+/g, "_") ?? "";
+  const variantTitle = normalizeKey(variantNode?.title);
 
-  // ✅ 3. Generate match keys
+  // ✅ 3. Generate match keys [time waste code, need improment]
   const matchCandidates = [
     baseKey && variantTitle ? `${baseKey}_${variantTitle}` : null,
     handleKey && variantTitle ? `${handleKey}_${variantTitle}` : null,

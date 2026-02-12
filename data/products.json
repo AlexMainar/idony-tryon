@@ -507,8 +507,8 @@
   },
   "lip_bloom_clover_club": {
     "display_name": "Lip Bloom Oil & Tint - Clover Club",
-    "color": "#af4b55",
-    "opacity": 0.6,
+    "color": "#d85a5b",
+    "opacity": 0.76,
     "regions": {
       "lips_outer": [
         61,
@@ -558,8 +558,8 @@
   },
   "lip_bloom_barbados": {
     "display_name": "Lip Bloom Oil & Tint - Barbados",
-    "color": "#845557",
-    "opacity": 0.6,
+    "color": "#9b5746",
+    "opacity": 0.75,
     "regions": {
       "lips_outer": [
         61,
@@ -609,8 +609,8 @@
   },
   "lip_bloom_ruby_vice": {
     "display_name": "Lip Bloom Oil & Tint - Ruby Vice",
-    "color": "#d40a39",
-    "opacity": 0.6,
+    "color": "#ca1133",
+    "opacity": 0.78,
     "regions": {
       "lips_outer": [
         61,
