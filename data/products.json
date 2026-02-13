@@ -68,8 +68,8 @@
   },
   "ethereal_luminizer": {
     "display_name": "Ethereal Luminizer - Stardust",
-    "color": "#f0c3aa",
-    "opacity": 0.35,
+    "color": "#f2ceb8",
+    "opacity": 0.46,
     "regions": {
       "upper_cheeks": [
         93,
@@ -507,7 +507,7 @@
   },
   "lip_bloom_clover_club": {
     "display_name": "Lip Bloom Oil & Tint - Clover Club",
-    "color": "#d85a5b",
+    "color": "#d84d59",
     "opacity": 0.76,
     "regions": {
       "lips_outer": [
@@ -558,8 +558,8 @@
   },
   "lip_bloom_barbados": {
     "display_name": "Lip Bloom Oil & Tint - Barbados",
-    "color": "#9b5746",
-    "opacity": 0.75,
+    "color": "#9a4f45",
+    "opacity": 0.74,
     "regions": {
       "lips_outer": [
         61,
@@ -609,8 +609,8 @@
   },
   "lip_bloom_ruby_vice": {
     "display_name": "Lip Bloom Oil & Tint - Ruby Vice",
-    "color": "#ca1133",
-    "opacity": 0.78,
+    "color": "#c41434",
+    "opacity": 0.8,
     "regions": {
       "lips_outer": [
         61,

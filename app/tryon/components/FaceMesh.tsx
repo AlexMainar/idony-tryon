@@ -29,7 +29,46 @@ const productCatalog = productsCatalog as Record<
   ProductToneDefinition
 >;
 
-const DEFAULT_CAMERA_ZOOM = 1.24;
+const DEFAULT_CAMERA_ZOOM = 1.34;
+
+function applyFaceFocusVignette(
+  ctx: CanvasRenderingContext2D,
+  landmarks: { x: number; y: number }[],
+  width: number,
+  height: number
+) {
+  const nose = landmarks[1];
+  const leftTemple = landmarks[234];
+  const rightTemple = landmarks[454];
+  if (!nose || !leftTemple || !rightTemple) return;
+
+  const cx = nose.x * width;
+  const cy = nose.y * height;
+  const faceWidth = Math.max(
+    120,
+    Math.abs(rightTemple.x - leftTemple.x) * width
+  );
+  const innerRadius = faceWidth * 0.58;
+  const outerRadius = faceWidth * 1.35;
+
+  const vignette = ctx.createRadialGradient(
+    cx,
+    cy,
+    innerRadius,
+    cx,
+    cy,
+    outerRadius
+  );
+  vignette.addColorStop(0, "rgba(0,0,0,0)");
+  vignette.addColorStop(0.68, "rgba(0,0,0,0.04)");
+  vignette.addColorStop(1, "rgba(0,0,0,0.2)");
+
+  ctx.save();
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, width, height);
+  ctx.restore();
+}
 
 // Canvas fijo y simple
 export default function FaceMeshComponent({
@@ -40,6 +79,7 @@ export default function FaceMeshComponent({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const landmarkerRef = useRef<FaceLandmarker | null>(null);
   const lastVideoTimeRef = useRef(-1);
+  const faceAnchorRef = useRef<{ x: number; y: number } | null>(null);
   const zoomRef = useRef(DEFAULT_CAMERA_ZOOM);
   const productDataRef = useRef<ProductToneData | null>(null);
 
@@ -174,10 +214,47 @@ export default function FaceMeshComponent({
         canvas.height / video.videoHeight
       );
       const scale = baseScale * zoomRef.current;
-      const offsetX =
+      const baseOffsetX =
         (canvas.width - video.videoWidth * scale) / 2;
-      const offsetY =
+      const baseOffsetY =
         (canvas.height - video.videoHeight * scale) / 2;
+
+      let offsetX = baseOffsetX;
+      let offsetY = baseOffsetY;
+      if (
+        results.faceLandmarks &&
+        results.faceLandmarks.length > 0
+      ) {
+        const landmarks = results.faceLandmarks[0];
+        const nose = landmarks[1];
+        if (nose) {
+          const nextAnchor = {
+            x: nose.x * video.videoWidth,
+            y: nose.y * video.videoHeight,
+          };
+          const prev = faceAnchorRef.current;
+          const smoothed = prev
+            ? {
+                x: prev.x + (nextAnchor.x - prev.x) * 0.22,
+                y: prev.y + (nextAnchor.y - prev.y) * 0.22,
+              }
+            : nextAnchor;
+
+          faceAnchorRef.current = smoothed;
+
+          const targetX = canvas.width * 0.5;
+          const targetY = canvas.height * 0.5;
+          offsetX = targetX - smoothed.x * scale;
+          offsetY = targetY - smoothed.y * scale;
+
+          const minOffsetX = canvas.width - video.videoWidth * scale;
+          const minOffsetY = canvas.height - video.videoHeight * scale;
+          offsetX = Math.min(0, Math.max(minOffsetX, offsetX));
+          offsetY = Math.min(0, Math.max(minOffsetY, offsetY));
+        }
+      } else {
+        faceAnchorRef.current = null;
+      }
 
       ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
       ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
@@ -188,14 +265,29 @@ export default function FaceMeshComponent({
         results.faceLandmarks &&
         results.faceLandmarks.length > 0
       ) {
+        const landmarks = results.faceLandmarks[0];
+        const isLipBloom =
+          currentProductData.display_name
+            ?.toLowerCase()
+            .includes("lip bloom") ?? false;
+
         applyTone(
           ctx,
-          results.faceLandmarks[0],
+          landmarks,
           currentProductData,
           video.videoWidth,
           video.videoHeight,
           hexToRgba
         );
+
+        if (isLipBloom) {
+          applyFaceFocusVignette(
+            ctx,
+            landmarks,
+            video.videoWidth,
+            video.videoHeight
+          );
+        }
       }
 
       ctx.setTransform(1, 0, 0, 1, 0, 0);

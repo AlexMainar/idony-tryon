@@ -28,11 +28,11 @@ export function applyTone(
 
   // 🧭 Detection by keywords
   const isBlush =
-    name.includes("blush") || type.includes("cheeks");
+    name.includes("blush") || name.includes("flush") || type.includes("cheeks");
   const isBronzer =
     name.includes("bronzer") || type.includes("bronzer");
   const isHighlighter =
-    name.includes("luminizer") || name.includes("highlight") || name.includes("flush") || type.includes("highlighter");
+    name.includes("luminizer") || name.includes("highlight") || type.includes("highlighter");
   const isLipGrace =
     name.includes("lip grace") || name.includes("lipstick") || type.includes("lips_inner");
   const isLipOil =

@@ -17,28 +17,36 @@ export function renderLipOil(
 
   // --- Per-tone tuning ---
   const toneMap: Record<string, { brightness: number; gloss: number }> = {
-    "Lip Bloom Oil & Tint - Ruby Vice": { brightness: 1.0, gloss: 0.62 },
-    "Lip Bloom Oil & Tint - Clover Club": { brightness: 1.0, gloss: 0.58 },
-    "Lip Bloom Oil & Tint - Barbados": { brightness: 0.92, gloss: 0.54 },
+    "Lip Bloom Oil & Tint - Ruby Vice": { brightness: 0.98, gloss: 0.36 },
+    "Lip Bloom Oil & Tint - Clover Club": { brightness: 0.95, gloss: 0.33 },
+    "Lip Bloom Oil & Tint - Barbados": { brightness: 0.92, gloss: 0.3 },
   };
   const toneSettings =
     toneMap[productData.display_name || ""] || { brightness: 1, gloss: 0.4 };
 
   const colorDeposit = hexToRgba(
     productData.color,
-    Math.min(1, productData.opacity * 1.08)
+    Math.min(1, productData.opacity * 1.22)
   );
   const colorBlend = hexToRgba(
     productData.color,
-    Math.min(1, productData.opacity * 0.95)
+    Math.min(1, productData.opacity * 1.05)
   );
 
   // --- Build outer & inner paths ---
   const outerPath = new Path2D();
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
   outer.forEach((i, idx) => {
     const p = landmarks[i];
     const x = p.x * width;
     const y = p.y * height;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
     if (idx === 0) outerPath.moveTo(x, y);
     else outerPath.lineTo(x, y);
   });
@@ -59,57 +67,103 @@ export function renderLipOil(
   lipFillPath.addPath(outerPath);
   lipFillPath.addPath(innerPath);
 
-  // --- 1️⃣ Base layers: stronger pigment + natural blend ---
+  const lipWidth = Math.max(1, maxX - minX);
+  const lipHeight = Math.max(1, maxY - minY);
+  const lipCenterX = (minX + maxX) / 2;
+  const upperLipY = landmarks[13].y * height;
+  const lowerLipY = landmarks[14].y * height;
+
+  // --- 1️⃣ Base layers: preserve natural lip shading (avoid flat neon paint) ---
   ctx.save();
-  ctx.globalCompositeOperation = "source-over";
+  ctx.globalCompositeOperation = "multiply";
+  ctx.globalAlpha = 0.9;
   ctx.filter = "blur(1.5px)";
   ctx.fillStyle = colorDeposit;
   ctx.fill(lipFillPath, "evenodd");
   ctx.restore();
 
   ctx.save();
-  ctx.globalCompositeOperation = "multiply";
-  ctx.globalAlpha = 0.9;
+  ctx.globalCompositeOperation = "soft-light";
+  ctx.globalAlpha = 0.3;
   ctx.filter = "blur(1.5px)";
   ctx.fillStyle = colorBlend;
   ctx.fill(lipFillPath, "evenodd");
   ctx.restore();
 
-  // --- 2️⃣ Brightness correction (simulate undertone reflection) ---
+  // --- 2️⃣ Lip depth map: keep contour darker and center slightly brighter ---
+  const depthGrad = ctx.createLinearGradient(minX, 0, maxX, 0);
+  depthGrad.addColorStop(0, "rgba(0,0,0,0.12)");
+  depthGrad.addColorStop(0.18, "rgba(0,0,0,0.03)");
+  depthGrad.addColorStop(0.5, "rgba(255,255,255,0.08)");
+  depthGrad.addColorStop(0.82, "rgba(0,0,0,0.03)");
+  depthGrad.addColorStop(1, "rgba(0,0,0,0.12)");
+
+  ctx.save();
+  ctx.globalCompositeOperation = "soft-light";
+  ctx.globalAlpha = 0.2;
+  ctx.fillStyle = depthGrad;
+  ctx.fill(lipFillPath, "evenodd");
+  ctx.restore();
+
+  // --- 3️⃣ Brightness correction (simulate undertone reflection) ---
   ctx.save();
   ctx.globalCompositeOperation = "screen";
-  ctx.globalAlpha = 0.11 * toneSettings.brightness;
+  ctx.globalAlpha = 0.038 * toneSettings.brightness;
   const brightGrad = ctx.createRadialGradient(
-    width / 2,
-    height / 2,
+    lipCenterX,
+    (upperLipY + lowerLipY) / 2,
     0,
-    width / 2,
-    height / 2,
-    250
+    lipCenterX,
+    (upperLipY + lowerLipY) / 2,
+    lipWidth * 0.62
   );
-  brightGrad.addColorStop(0, "rgba(255,255,255,0.25)");
+  brightGrad.addColorStop(0, "rgba(255,255,255,0.08)");
   brightGrad.addColorStop(1, "transparent");
   ctx.fillStyle = brightGrad;
   ctx.fill(lipFillPath, "evenodd");
   ctx.restore();
 
-  // --- 3️⃣ Gloss layer: upper-lip highlight ---
+  // --- 4️⃣ Gloss layer: tight directional highlights (less hologram) ---
   const upperHighlightY =
-    landmarks[13].y * height - (height * 0.015 * toneSettings.gloss);
-  const glossGrad = ctx.createLinearGradient(0, upperHighlightY, 0, upperHighlightY + 80);
-  glossGrad.addColorStop(0, "rgba(255,255,255,0.35)");
-  glossGrad.addColorStop(0.4, "rgba(255,255,255,0.15)");
+    upperLipY - (lipHeight * 0.26 * toneSettings.gloss);
+  const glossGrad = ctx.createLinearGradient(
+    0,
+    upperHighlightY,
+    0,
+    upperHighlightY + lipHeight * 0.95
+  );
+  glossGrad.addColorStop(0, "rgba(255,255,255,0.18)");
+  glossGrad.addColorStop(0.35, "rgba(255,255,255,0.05)");
   glossGrad.addColorStop(1, "transparent");
 
   ctx.save();
   ctx.globalCompositeOperation = "screen";
-  ctx.filter = "blur(6px)";
+  ctx.filter = "blur(5px)";
   ctx.globalAlpha = toneSettings.gloss;
   ctx.fillStyle = glossGrad;
   ctx.fill(lipFillPath, "evenodd");
   ctx.restore();
 
-  // --- 4️⃣ Final soft overlay for natural blending ---
+  const wetSpot = ctx.createRadialGradient(
+    lipCenterX,
+    lowerLipY - lipHeight * 0.08,
+    0,
+    lipCenterX,
+    lowerLipY - lipHeight * 0.08,
+    lipWidth * 0.18
+  );
+  wetSpot.addColorStop(0, "rgba(255,255,255,0.22)");
+  wetSpot.addColorStop(1, "transparent");
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.filter = "blur(3px)";
+  ctx.globalAlpha = toneSettings.gloss * 0.55;
+  ctx.fillStyle = wetSpot;
+  ctx.fill(lipFillPath, "evenodd");
+  ctx.restore();
+
+  // --- 5️⃣ Final soft overlay for natural blending ---
   ctx.save();
   ctx.globalCompositeOperation = "soft-light";
   ctx.filter = "blur(2px)";
