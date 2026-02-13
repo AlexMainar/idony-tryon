@@ -112,29 +112,21 @@ echo "   Account: ${ACTIVE_ACCOUNT}"
 gcloud run deploy "${SERVICE_NAME}" \
   --project "${PROJECT_ID}" \
   --region "${REGION}" \
-  --source . \
-  --allow-unauthenticated \
-  --set-env-vars "SHOPIFY_STORE_DOMAIN=${SHOPIFY_STORE_DOMAIN},SHOPIFY_STOREFRONT_ACCESS_TOKEN=${SHOPIFY_STOREFRONT_ACCESS_TOKEN}"
+  --source .
 
 SERVICE_URL="$(gcloud run services describe "${SERVICE_NAME}" --project "${PROJECT_ID}" --region "${REGION}" --format='value(status.url)')"
 echo "Deployment complete: ${SERVICE_URL}"
 
 echo ""
-echo "Ensuring public access (allUsers → run.invoker)..."
-
-gcloud run services add-iam-policy-binding "${SERVICE_NAME}" \
-  --project "${PROJECT_ID}" \
-  --region "${REGION}" \
-  --member="allUsers" \
-  --role="roles/run.invoker" \
-  --quiet || echo "WARNING: Could not set public access automatically (check org policy)."
+echo "Skipping automatic public access configuration."
+echo "If needed, configure IAM permissions manually in Cloud Console."
 
 echo ""
 echo "Do you want to map a custom domain now?"
 if confirm "Map custom domain to this service?"; then
-  read -r -p "Enter domain (e.g. tryon.idonycosmetics.com): " CUSTOM_DOMAIN
+  read -r -p "Enter domain e.g. tryon.idonycosmetics.com: " CUSTOM_DOMAIN
   if [[ -n "${CUSTOM_DOMAIN}" ]]; then
-    gcloud run domain-mappings create \
+    gcloud beta run domain-mappings create \
       --service "${SERVICE_NAME}" \
       --project "${PROJECT_ID}" \
       --region "${REGION}" \
