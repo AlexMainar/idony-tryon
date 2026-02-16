@@ -334,6 +334,12 @@ export default function FaceMeshComponent({
 
       if (!payload || typeof payload !== "object") return;
 
+      if (payload.type === "TRYON_STOP_CAMERA") {
+        setIsCameraOn(false);
+        setIsStreamReady(false);
+        return;
+      }
+
       if (payload.type === "COLOR_CHANGED") {
         const incomingVariantId = payload.variantId
           ? String(payload.variantId)

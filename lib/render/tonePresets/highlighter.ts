@@ -25,10 +25,10 @@ type AreaStyle = {
 
 const AREA_STYLES: Record<string, AreaStyle> = {
   upper_cheeks: {
-    baseOpacity: 0.95,
-    liftOpacity: 1.0,
-    sweepOpacity: 0.7,
-    spotOpacity: 0.9,
+    baseOpacity: 0.88,
+    liftOpacity: 0.9,
+    sweepOpacity: 0.55,
+    spotOpacity: 0.75,
     baseBlur: 8,
     liftBlur: 7,
     sweepBlur: 5,
@@ -39,10 +39,10 @@ const AREA_STYLES: Record<string, AreaStyle> = {
     shiftY: 0.22,
   },
   nose_tip: {
-    baseOpacity: 0.65,
-    liftOpacity: 0.75,
-    sweepOpacity: 0.2,
-    spotOpacity: 0.85,
+    baseOpacity: 0.58,
+    liftOpacity: 0.65,
+    sweepOpacity: 0.12,
+    spotOpacity: 0.72,
     baseBlur: 5,
     liftBlur: 5,
     sweepBlur: 4,
@@ -67,10 +67,10 @@ const AREA_STYLES: Record<string, AreaStyle> = {
     shiftY: 0.1,
   },
   cupid_bow: {
-    baseOpacity: 0.6,
-    liftOpacity: 0.62,
-    sweepOpacity: 0.15,
-    spotOpacity: 0.6,
+    baseOpacity: 0.52,
+    liftOpacity: 0.55,
+    sweepOpacity: 0.1,
+    spotOpacity: 0.5,
     baseBlur: 4,
     liftBlur: 4,
     sweepBlur: 3,
@@ -126,7 +126,8 @@ export function renderHighlighter(
   const toneBase = hexToRgba(productData.color, baseOpacity * 0.75);
   const toneMid = hexToRgba(productData.color, baseOpacity * 0.42);
 
-  const highlightAreas = ["upper_cheeks", "nose_tip", "eyelids", "cupid_bow"];
+  // Luminizer should lift high points, but never look like eye makeup.
+  const highlightAreas = ["upper_cheeks", "nose_tip", "cupid_bow"];
   highlightAreas.forEach((area) => {
     const region = productData.regions[area];
     if (!region) return;

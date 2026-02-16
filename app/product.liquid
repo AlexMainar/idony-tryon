@@ -101,9 +101,6 @@
       console.log("❌ tryon-root missing");
       return;
     }
-    const originalParent = TRYON_ROOT.parentElement;
-    const originalNext = TRYON_ROOT.nextSibling;
-
     TRYON_ROOT.style.display = "none";
     TRYON_ROOT.style.pointerEvents = "none";
 
@@ -289,6 +286,11 @@
 
 
     function closeTryon() {
+      const iframe = getIframe();
+      if (iframe?.contentWindow) {
+        iframe.contentWindow.postMessage({ type: "TRYON_STOP_CAMERA" }, "*");
+      }
+
       TRYON_ROOT.style.display = "none";
       TRYON_ROOT.style.pointerEvents = "none";
       TRYON_ROOT.style.position = "";
@@ -306,13 +308,8 @@
       document.body.classList.remove("tryon-mobile-open");
       removeMobileShadeBar();
 
-     if (originalParent && TRYON_ROOT.parentElement !== originalParent) {
-        if (originalNext && originalNext.parentNode === originalParent) {
-          originalParent.insertBefore(TRYON_ROOT, originalNext);
-        } else {
-          originalParent.appendChild(TRYON_ROOT);
-        }
-      }
+      // Keep root mounted in body after first open; re-parenting can reinitialize
+      // the iframe and unintentionally restart the camera after close.
 
       if (mutationSyncTimeout) {
         clearTimeout(mutationSyncTimeout);
