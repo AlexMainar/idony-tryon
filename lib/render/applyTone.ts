@@ -38,17 +38,6 @@ export function applyTone(
   const isLipOil =
     name.includes("lip bloom") || name.includes("oil & tint");
 
-  // 🧠 Debug info
-  console.log("🎨 applyTone dispatching ->", {
-    name,
-    type,
-    isBlush,
-    isBronzer,
-    isHighlighter,
-    isLipGrace,
-    isLipOil
-  });
-
   // 🧩 Dispatch to correct renderer
   ctx.save();
   if (isBlush) renderBlush(ctx, landmarks, productData, width, height, hexToRgba);

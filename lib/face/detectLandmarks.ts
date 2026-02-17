@@ -7,9 +7,13 @@ let faceLandmarker: FaceLandmarker | null = null;
  * Caches the instance so we don't reload it every time.
  */
 export async function initFaceLandmarker(): Promise<FaceLandmarker> {
-  if (faceLandmarker) return faceLandmarker;
+  if (faceLandmarker) {
+    console.log("[TRYON PERF] face landmarker cache hit");
+    return faceLandmarker;
+  }
 
   try {
+    const startedAt = performance.now();
     console.log("🧠 Initializing MediaPipe FaceLandmarker...");
     const vision = await FilesetResolver.forVisionTasks("/mediapipe");
     faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
@@ -17,7 +21,9 @@ export async function initFaceLandmarker(): Promise<FaceLandmarker> {
       runningMode: "VIDEO",
       numFaces: 1,
     });
-    console.log("✅ FaceLandmarker ready.");
+    console.log("✅ FaceLandmarker ready.", {
+      ms: Math.round(performance.now() - startedAt),
+    });
     return faceLandmarker;
   } catch (err) {
     console.error("❌ Error initializing FaceLandmarker:", err);

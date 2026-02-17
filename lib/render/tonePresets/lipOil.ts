@@ -72,20 +72,24 @@ export function renderLipOil(
   const lipCenterX = (minX + maxX) / 2;
   const upperLipY = landmarks[13].y * height;
   const lowerLipY = landmarks[14].y * height;
+  const baseBlur = Math.max(1.0, Math.min(2.0, lipWidth * 0.016));
+  const glazeBlur = Math.max(1.8, Math.min(4.2, lipWidth * 0.03));
 
   // --- 1️⃣ Base layers: preserve natural lip shading (avoid flat neon paint) ---
   ctx.save();
+  ctx.clip(lipFillPath, "evenodd");
   ctx.globalCompositeOperation = "multiply";
   ctx.globalAlpha = 0.9;
-  ctx.filter = "blur(1.5px)";
+  ctx.filter = `blur(${baseBlur}px)`;
   ctx.fillStyle = colorDeposit;
   ctx.fill(lipFillPath, "evenodd");
   ctx.restore();
 
   ctx.save();
+  ctx.clip(lipFillPath, "evenodd");
   ctx.globalCompositeOperation = "soft-light";
   ctx.globalAlpha = 0.3;
-  ctx.filter = "blur(1.5px)";
+  ctx.filter = `blur(${baseBlur}px)`;
   ctx.fillStyle = colorBlend;
   ctx.fill(lipFillPath, "evenodd");
   ctx.restore();
@@ -100,13 +104,14 @@ export function renderLipOil(
 
   ctx.save();
   ctx.globalCompositeOperation = "soft-light";
-  ctx.globalAlpha = 0.2;
+  ctx.globalAlpha = 0.12;
   ctx.fillStyle = depthGrad;
   ctx.fill(lipFillPath, "evenodd");
   ctx.restore();
 
   // --- 3️⃣ Brightness correction (simulate undertone reflection) ---
   ctx.save();
+  ctx.clip(lipFillPath, "evenodd");
   ctx.globalCompositeOperation = "screen";
   ctx.globalAlpha = 0.038 * toneSettings.brightness;
   const brightGrad = ctx.createRadialGradient(
@@ -137,9 +142,10 @@ export function renderLipOil(
   glossGrad.addColorStop(1, "transparent");
 
   ctx.save();
+  ctx.clip(lipFillPath, "evenodd");
   ctx.globalCompositeOperation = "screen";
-  ctx.filter = "blur(5px)";
-  ctx.globalAlpha = toneSettings.gloss;
+  ctx.filter = `blur(${glazeBlur}px)`;
+  ctx.globalAlpha = toneSettings.gloss * 0.82;
   ctx.fillStyle = glossGrad;
   ctx.fill(lipFillPath, "evenodd");
   ctx.restore();
@@ -156,17 +162,19 @@ export function renderLipOil(
   wetSpot.addColorStop(1, "transparent");
 
   ctx.save();
+  ctx.clip(lipFillPath, "evenodd");
   ctx.globalCompositeOperation = "screen";
-  ctx.filter = "blur(3px)";
-  ctx.globalAlpha = toneSettings.gloss * 0.55;
+  ctx.filter = `blur(${Math.max(1, glazeBlur * 0.6)}px)`;
+  ctx.globalAlpha = toneSettings.gloss * 0.4;
   ctx.fillStyle = wetSpot;
   ctx.fill(lipFillPath, "evenodd");
   ctx.restore();
 
   // --- 5️⃣ Final soft overlay for natural blending ---
   ctx.save();
+  ctx.clip(lipFillPath, "evenodd");
   ctx.globalCompositeOperation = "soft-light";
-  ctx.filter = "blur(2px)";
+  ctx.filter = `blur(${Math.max(0.8, baseBlur * 1.25)}px)`;
   ctx.globalAlpha = 0.24;
   ctx.fillStyle = colorBlend;
   ctx.fill(lipFillPath, "evenodd");

@@ -31,6 +31,14 @@ const productCatalog = productsCatalog as Record<
 
 const DEFAULT_CAMERA_ZOOM = 1.34;
 
+function ensureCanvasPresentationStyles(canvas: HTMLCanvasElement) {
+  if (canvas.style.width !== "100%") canvas.style.width = "100%";
+  if (canvas.style.height !== "100%") canvas.style.height = "100%";
+  if (canvas.style.zIndex !== "10") canvas.style.zIndex = "10";
+  if (canvas.style.position !== "absolute") canvas.style.position = "absolute";
+  if (canvas.style.pointerEvents !== "none") canvas.style.pointerEvents = "none";
+}
+
 function applyFaceFocusVignette(
   ctx: CanvasRenderingContext2D,
   landmarks: { x: number; y: number }[],
@@ -82,6 +90,10 @@ export default function FaceMeshComponent({
   const faceAnchorRef = useRef<{ x: number; y: number } | null>(null);
   const zoomRef = useRef(DEFAULT_CAMERA_ZOOM);
   const productDataRef = useRef<ProductToneData | null>(null);
+  const isCameraOnRef = useRef(true);
+  const isStreamReadyRef = useRef(false);
+  const cameraStartRequestAtRef = useRef<number | null>(null);
+  const firstLandmarksMetricSentRef = useRef(false);
 
 
   const [zoom, setZoom] = useState(DEFAULT_CAMERA_ZOOM);
@@ -100,6 +112,14 @@ export default function FaceMeshComponent({
   useEffect(() => {
     zoomRef.current = zoom;
   }, [zoom]);
+
+  useEffect(() => {
+    isCameraOnRef.current = isCameraOn;
+  }, [isCameraOn]);
+
+  useEffect(() => {
+    isStreamReadyRef.current = isStreamReady;
+  }, [isStreamReady]);
 
   // Resolver datos de tono del producto
   useEffect(() => {
@@ -141,7 +161,7 @@ export default function FaceMeshComponent({
     let isMounted = true;
     let animationFrameId: number | null = null;
 
-    const detectFace = async () => {
+    const detectFace = () => {
       if (!isMounted) return;
 
       if (
@@ -184,20 +204,34 @@ export default function FaceMeshComponent({
         canvas.height = video.videoHeight;
       }
 
-      // visible size (critical fix)
-      canvas.style.width = "100%";
-      canvas.style.height = "100%";
+      // Keep styles stable while avoiding per-frame DOM writes.
+      ensureCanvasPresentationStyles(canvas);
 
-      // FIX: Mediapipe keeps overwriting canvas styles → force correct stacking
-      canvas.style.zIndex = "10";
-      canvas.style.position = "absolute";
-      canvas.style.pointerEvents = "none";
-
-      const results = await landmarkerRef.current.detectForVideo(
+      const results = landmarkerRef.current.detectForVideo(
         video,
         performance.now()
       );
       if (!isMounted) return;
+
+      if (
+        !firstLandmarksMetricSentRef.current &&
+        results.faceLandmarks &&
+        results.faceLandmarks.length > 0
+      ) {
+        firstLandmarksMetricSentRef.current = true;
+        const sinceStartMs =
+          cameraStartRequestAtRef.current == null
+            ? null
+            : Math.round(performance.now() - cameraStartRequestAtRef.current);
+        window.parent?.postMessage(
+          {
+            type: "TRYON_METRIC",
+            stage: "first_landmarks",
+            sinceStartMs,
+          },
+          "*"
+        );
+      }
 
       const currentProductData = productDataRef.current;
       if (!currentProductData) {
@@ -235,8 +269,8 @@ export default function FaceMeshComponent({
           const prev = faceAnchorRef.current;
           const smoothed = prev
             ? {
-                x: prev.x + (nextAnchor.x - prev.x) * 0.22,
-                y: prev.y + (nextAnchor.y - prev.y) * 0.22,
+                x: prev.x + (nextAnchor.x - prev.x) * 0.34,
+                y: prev.y + (nextAnchor.y - prev.y) * 0.34,
               }
             : nextAnchor;
 
@@ -335,8 +369,30 @@ export default function FaceMeshComponent({
       if (!payload || typeof payload !== "object") return;
 
       if (payload.type === "TRYON_STOP_CAMERA") {
+        cameraStartRequestAtRef.current = null;
+        firstLandmarksMetricSentRef.current = false;
         setIsCameraOn(false);
         setIsStreamReady(false);
+        return;
+      }
+
+      if (payload.type === "TRYON_START_CAMERA") {
+        cameraStartRequestAtRef.current = performance.now();
+        firstLandmarksMetricSentRef.current = false;
+        if (isCameraOnRef.current && isStreamReadyRef.current) {
+          window.parent?.postMessage(
+            { type: "TRYON_METRIC", stage: "already_ready_on_start_cmd" },
+            "*"
+          );
+          window.parent?.postMessage({ type: "TRYON_READY" }, "*");
+          return;
+        }
+        window.parent?.postMessage(
+          { type: "TRYON_METRIC", stage: "start_cmd_received" },
+          "*"
+        );
+        setIsStreamReady(false);
+        setIsCameraOn(true);
         return;
       }
 
@@ -436,6 +492,18 @@ export default function FaceMeshComponent({
   const handleStreamReady = useCallback(() => {
     setIsStreamReady(true);
     lastVideoTimeRef.current = -1;
+    const sinceStartMs =
+      cameraStartRequestAtRef.current == null
+        ? null
+        : Math.round(performance.now() - cameraStartRequestAtRef.current);
+    window.parent?.postMessage(
+      {
+        type: "TRYON_METRIC",
+        stage: "stream_ready",
+        sinceStartMs,
+      },
+      "*"
+    );
     // 🔔 Tell Shopify: camera + canvas are ready
     window.parent?.postMessage({ type: "TRYON_READY" }, "*");
   }, []);
@@ -444,7 +512,28 @@ export default function FaceMeshComponent({
     setIsStreamReady(false);
   }, []);
 
+  const handleStreamError = useCallback((error: Error) => {
+    setIsStreamReady(false);
+    window.parent?.postMessage(
+      {
+        type: "TRYON_METRIC",
+        stage: "stream_error",
+        message: error?.message || "Failed to access camera",
+      },
+      "*"
+    );
+    window.parent?.postMessage(
+      {
+        type: "TRYON_CAMERA_ERROR",
+        message: error?.message || "Failed to access camera",
+      },
+      "*"
+    );
+  }, []);
+
   const stopCamera = useCallback(() => {
+    cameraStartRequestAtRef.current = null;
+    firstLandmarksMetricSentRef.current = false;
     setIsCameraOn(false);
     setIsStreamReady(false);
   }, []);
@@ -471,6 +560,7 @@ export default function FaceMeshComponent({
         isActive={isCameraOn}
         onStreamReady={handleStreamReady}
         onStreamStopped={handleStreamStopped}
+        onStreamError={handleStreamError}
         className="absolute inset-0 w-full h-full object-contain opacity-0 z-0"
       />
 
