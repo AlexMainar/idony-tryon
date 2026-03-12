@@ -39,6 +39,23 @@ function ensureCanvasPresentationStyles(canvas: HTMLCanvasElement) {
   if (canvas.style.pointerEvents !== "none") canvas.style.pointerEvents = "none";
 }
 
+function syncCanvasResolution(canvas: HTMLCanvasElement) {
+  const rect = canvas.getBoundingClientRect();
+  const cssWidth = Math.max(1, Math.round(rect.width));
+  const cssHeight = Math.max(1, Math.round(rect.height));
+  const dpr =
+    typeof window === "undefined"
+      ? 1
+      : Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const nextWidth = Math.max(1, Math.round(cssWidth * dpr));
+  const nextHeight = Math.max(1, Math.round(cssHeight * dpr));
+
+  if (canvas.width !== nextWidth || canvas.height !== nextHeight) {
+    canvas.width = nextWidth;
+    canvas.height = nextHeight;
+  }
+}
+
 function applyFaceFocusVignette(
   ctx: CanvasRenderingContext2D,
   landmarks: { x: number; y: number }[],
@@ -195,17 +212,10 @@ export default function FaceMeshComponent({
       }
       lastVideoTimeRef.current = video.currentTime;
 
-      // Mantener el canvas con la resolución nativa de la cámara
-      if (
-        canvas.width !== video.videoWidth ||
-        canvas.height !== video.videoHeight
-      ) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-      }
-
-      // Keep styles stable while avoiding per-frame DOM writes.
+      // Match the backing store to the real iframe viewport so Shopify gallery
+      // aspect ratios do not stretch the rendered frame on some products.
       ensureCanvasPresentationStyles(canvas);
+      syncCanvasResolution(canvas);
 
       const results = landmarkerRef.current.detectForVideo(
         video,
@@ -405,6 +415,15 @@ export default function FaceMeshComponent({
           : null;
         if (!incomingVariantId && !incomingVariantTitle) return;
 
+        // Shopify re-open flow can send COLOR_CHANGED without TRYON_START_CAMERA.
+        // If camera was stopped on close, wake it up here so the iframe can become ready again.
+        if (!isCameraOnRef.current) {
+          cameraStartRequestAtRef.current = performance.now();
+          firstLandmarksMetricSentRef.current = false;
+          setIsStreamReady(false);
+          setIsCameraOn(true);
+        }
+
         console.log("💄 Received new variant from Shopify:", {
           id: incomingVariantId,
           title: incomingVariantTitle,
@@ -561,7 +580,7 @@ export default function FaceMeshComponent({
         onStreamReady={handleStreamReady}
         onStreamStopped={handleStreamStopped}
         onStreamError={handleStreamError}
-        className="absolute inset-0 w-full h-full object-contain opacity-0 z-0"
+        className="absolute inset-0 w-full h-full object-cover opacity-0 z-0"
       />
 
       {/* CANVAS (visible layer with makeup) */}

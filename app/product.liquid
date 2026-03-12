@@ -95,6 +95,7 @@
     let variantSyncTimeout = null;
     let reanchorBlockedUntil = 0;
     let lastRect = null;
+    let tryonCameraAspect = null;
     const MOVE_EPS = 2;
     
     if (!TRYON_ROOT) {
@@ -103,6 +104,8 @@
     }
     TRYON_ROOT.style.display = "none";
     TRYON_ROOT.style.pointerEvents = "none";
+    TRYON_ROOT.style.overflow = "hidden";
+    TRYON_ROOT.style.background = "#000";
 
     const getIframe = () => document.querySelector("#tryon-frame");
     const tryonButtonTemplate = (() => {
@@ -340,6 +343,34 @@
       return currentMediaSpace;
     }
 
+    function fitRectToAspect(rect, aspect) {
+      if (!aspect || !Number.isFinite(aspect) || aspect <= 0) {
+        return {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+        };
+      }
+
+      const rectAspect = rect.width / Math.max(1, rect.height);
+      let width = rect.width;
+      let height = rect.height;
+
+      if (aspect > rectAspect) {
+        height = rect.width / aspect;
+      } else {
+        width = rect.height * aspect;
+      }
+
+      return {
+        left: rect.left + (rect.width - width) / 2,
+        top: rect.top + (rect.height - height) / 2,
+        width,
+        height,
+      };
+    }
+
 
     function closeTryon() {
       const iframe = getIframe();
@@ -399,7 +430,10 @@
       const anchorEl = getDesktopAnchorElement();
       if (!anchorEl) return;
 
-      const rect = anchorEl.getBoundingClientRect();
+      const rect = fitRectToAspect(
+        anchorEl.getBoundingClientRect(),
+        tryonCameraAspect
+      );
       const nextRect = {
         left: Math.round(rect.left),
         top: Math.round(rect.top),
@@ -661,6 +695,17 @@
     });
 
     window.addEventListener("message", (event) => {
+      if (event?.data?.type === "TRYON_CAMERA_ASPECT") {
+          const aspect = Number(event?.data?.aspect);
+          if (Number.isFinite(aspect) && aspect > 0.2 && aspect < 5) {
+            tryonCameraAspect = aspect;
+            if (tryonOpen && !isMobileTryon()) {
+              lastRect = null;
+              requestAnimationFrame(syncTryonPosition);
+            }
+          }
+          return;
+        }
       if (event?.data?.type === "TRYON_READY") {
           const loading = document.querySelector("#tryon-loading");
           if (loading) loading.classList.add("is-hidden");

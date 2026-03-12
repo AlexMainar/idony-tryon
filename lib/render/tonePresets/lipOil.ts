@@ -1,6 +1,7 @@
 import { ProductToneData, RegionDefinition } from "@/lib/utils";
 
 type Landmark = { x: number; y: number };
+type Point = { x: number; y: number };
 type ToneSettings = { brightness: number; gloss: number };
 type LipBounds = {
   minX: number;
@@ -33,6 +34,39 @@ const toPoint = (
 };
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+
+const buildClosedPath = (points: Point[]): Path2D => {
+  const path = new Path2D();
+  if (!points.length) return path;
+  path.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i += 1) {
+    path.lineTo(points[i].x, points[i].y);
+  }
+  path.closePath();
+  return path;
+};
+
+const getPolygonCenter = (points: Point[]): Point => {
+  if (!points.length) return { x: 0, y: 0 };
+  let sx = 0;
+  let sy = 0;
+  for (const p of points) {
+    sx += p.x;
+    sy += p.y;
+  }
+  return { x: sx / points.length, y: sy / points.length };
+};
+
+const scaleFromCenterXY = (
+  points: Point[],
+  center: Point,
+  scaleX: number,
+  scaleY: number
+): Point[] =>
+  points.map((p) => ({
+    x: center.x + (p.x - center.x) * scaleX,
+    y: center.y + (p.y - center.y) * scaleY,
+  }));
 
 function isVinylClearcoatEnabled() {
   if (typeof window === "undefined") return true;
@@ -141,6 +175,7 @@ function applyVinylClearcoat(
   const openness = clamp01(
     Math.abs(lowerLipY - upperLipY) / Math.max(1, lipHeight * 0.46)
   );
+  const openDamping = 1 - openness * 0.45;
 
   // Clearcoat film across the whole lip, intentionally low alpha.
   const coat = ctx.createLinearGradient(0, minY, 0, maxY);
@@ -152,7 +187,7 @@ function applyVinylClearcoat(
   ctx.clip(lipFillPath, "evenodd");
   ctx.globalCompositeOperation = "soft-light";
   ctx.filter = `blur(${Math.max(0.8, glazeBlur * 0.5)}px)`;
-  ctx.globalAlpha = glossStrength * 0.52;
+  ctx.globalAlpha = glossStrength * 0.52 * openDamping;
   ctx.fillStyle = coat;
   ctx.fill(lipFillPath, "evenodd");
   ctx.restore();
@@ -174,7 +209,7 @@ function applyVinylClearcoat(
   ctx.clip(lipFillPath, "evenodd");
   ctx.globalCompositeOperation = "screen";
   ctx.filter = `blur(${Math.max(1, glazeBlur * 1.05)}px)`;
-  ctx.globalAlpha = glossStrength * (0.33 - openness * 0.08);
+  ctx.globalAlpha = Math.max(0, glossStrength * (0.29 - openness * 0.16));
   ctx.fillStyle = broad;
   ctx.fill(lipFillPath, "evenodd");
   ctx.restore();
@@ -189,7 +224,7 @@ function applyVinylClearcoat(
     lipCenterX,
     upperBlobY,
     lipWidth * 0.085,
-    glossStrength * 0.4,
+    glossStrength * 0.4 * openDamping,
     blur
   );
   drawSpecBlob(
@@ -198,7 +233,7 @@ function applyVinylClearcoat(
     lipCenterX - lipWidth * 0.11,
     lowerBlobY,
     lipWidth * 0.08,
-    glossStrength * 0.46,
+    glossStrength * 0.46 * openDamping,
     blur
   );
   drawSpecBlob(
@@ -207,7 +242,7 @@ function applyVinylClearcoat(
     lipCenterX + lipWidth * 0.09,
     lowerBlobY + lipHeight * 0.01,
     lipWidth * 0.07,
-    glossStrength * 0.34,
+    glossStrength * 0.34 * openDamping,
     blur
   );
 }
@@ -243,7 +278,7 @@ export function renderLipOil(
   );
 
   // --- Build outer & inner paths ---
-  const outerPath = new Path2D();
+  const outerPoints: Point[] = [];
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
@@ -257,26 +292,17 @@ export function renderLipOil(
     minY = Math.min(minY, y);
     maxX = Math.max(maxX, x);
     maxY = Math.max(maxY, y);
-    if (idx === 0) outerPath.moveTo(x, y);
-    else outerPath.lineTo(x, y);
+    outerPoints.push({ x, y });
   }
-  outerPath.closePath();
 
-  const innerPath = new Path2D();
+  const innerPoints: Point[] = [];
   for (let idx = 0; idx < inner.length; idx += 1) {
     const i = inner[idx];
     const point = toPoint(landmarks, i, width, height);
     if (!point) return;
     const { x, y } = point;
-    if (idx === 0) innerPath.moveTo(x, y);
-    else innerPath.lineTo(x, y);
+    innerPoints.push({ x, y });
   }
-  innerPath.closePath();
-
-  // Build a single even-odd path so inner mouth is excluded without punching transparency
-  const lipFillPath = new Path2D();
-  lipFillPath.addPath(outerPath);
-  lipFillPath.addPath(innerPath);
 
   const lipWidth = Math.max(1, maxX - minX);
   const lipHeight = Math.max(1, maxY - minY);
@@ -286,8 +312,48 @@ export function renderLipOil(
   if (!upper13 || !lower14) return;
   const upperLipY = upper13.y;
   const lowerLipY = lower14.y;
-  const baseBlur = Math.max(1.0, Math.min(2.0, lipWidth * 0.016));
-  const glazeBlur = Math.max(1.8, Math.min(4.2, lipWidth * 0.03));
+  const lipCenterY = (minY + maxY) / 2;
+  const lipCenter = { x: lipCenterX, y: lipCenterY };
+  const mouthGapPx = Math.abs(lowerLipY - upperLipY);
+  const openness = clamp01(mouthGapPx / Math.max(1, lipHeight * 0.52));
+  const baseBlurRaw = Math.max(1.0, Math.min(2.0, lipWidth * 0.016));
+  const glazeBlurRaw = Math.max(1.8, Math.min(4.2, lipWidth * 0.03));
+  const blurDamping = 1 - openness * 0.5;
+  const baseBlur = Math.max(0.65, baseBlurRaw * blurDamping);
+  const glazeBlur = Math.max(1.0, glazeBlurRaw * (1 - openness * 0.58));
+
+  // Slightly expand outer contour so color reaches full visible vermilion edge.
+  const outerExpandPx = Math.max(0.8, Math.min(1.8, lipWidth * 0.009));
+  const expandedOuterPoints = outerPoints.map((p) => {
+    const dx = p.x - lipCenter.x;
+    const dy = p.y - lipCenter.y;
+    const len = Math.hypot(dx, dy) || 1;
+    return {
+      x: p.x + (dx / len) * outerExpandPx,
+      y: p.y + (dy / len) * outerExpandPx,
+    };
+  });
+
+  // Single mask for all passes: outer lip minus mouth cavity.
+  const lipMask = new Path2D();
+  lipMask.addPath(buildClosedPath(expandedOuterPoints));
+
+  const shouldCutMouthCavity = mouthGapPx > lipHeight * 0.06;
+  if (shouldCutMouthCavity && innerPoints.length >= 3) {
+    const innerCenter = getPolygonCenter(innerPoints);
+    const openT = clamp01((openness - 0.08) / 0.92);
+    // Aggressive cavity expansion removes inner-mouth veil/fog on open mouth frames.
+    const cavityScaleX = Math.min(1.42, 1.08 + openT * 0.24);
+    const cavityScaleY = Math.min(1.66, 1.18 + openT * 0.42);
+    const cavity = scaleFromCenterXY(
+      innerPoints,
+      innerCenter,
+      cavityScaleX,
+      cavityScaleY
+    );
+    lipMask.addPath(buildClosedPath(cavity));
+  }
+
   const lipBounds: LipBounds = {
     minX,
     minY,
@@ -302,21 +368,21 @@ export function renderLipOil(
 
   // --- 1️⃣ Base layers: preserve natural lip shading (avoid flat neon paint) ---
   ctx.save();
-  ctx.clip(lipFillPath, "evenodd");
+  ctx.clip(lipMask, "evenodd");
   ctx.globalCompositeOperation = "multiply";
   ctx.globalAlpha = 0.9;
   ctx.filter = `blur(${baseBlur}px)`;
   ctx.fillStyle = colorDeposit;
-  ctx.fill(lipFillPath, "evenodd");
+  ctx.fill(lipMask, "evenodd");
   ctx.restore();
 
   ctx.save();
-  ctx.clip(lipFillPath, "evenodd");
+  ctx.clip(lipMask, "evenodd");
   ctx.globalCompositeOperation = "soft-light";
   ctx.globalAlpha = 0.3;
   ctx.filter = `blur(${baseBlur}px)`;
   ctx.fillStyle = colorBlend;
-  ctx.fill(lipFillPath, "evenodd");
+  ctx.fill(lipMask, "evenodd");
   ctx.restore();
 
   // --- 2️⃣ Lip depth map: keep contour darker and center slightly brighter ---
@@ -331,12 +397,12 @@ export function renderLipOil(
   ctx.globalCompositeOperation = "soft-light";
   ctx.globalAlpha = 0.12;
   ctx.fillStyle = depthGrad;
-  ctx.fill(lipFillPath, "evenodd");
+  ctx.fill(lipMask, "evenodd");
   ctx.restore();
 
   // --- 3️⃣ Brightness correction (simulate undertone reflection) ---
   ctx.save();
-  ctx.clip(lipFillPath, "evenodd");
+  ctx.clip(lipMask, "evenodd");
   ctx.globalCompositeOperation = "screen";
   ctx.globalAlpha = 0.038 * toneSettings.brightness;
   const brightGrad = ctx.createRadialGradient(
@@ -350,39 +416,43 @@ export function renderLipOil(
   brightGrad.addColorStop(0, "rgba(255,255,255,0.08)");
   brightGrad.addColorStop(1, "transparent");
   ctx.fillStyle = brightGrad;
-  ctx.fill(lipFillPath, "evenodd");
+  ctx.fill(lipMask, "evenodd");
   ctx.restore();
 
   // --- 4️⃣ Gloss layer ---
-  if (isVinylClearcoatEnabled()) {
+  // Disable gloss quickly as mouth opens to prevent inner-mouth fog.
+  const glossOpenFade =
+    openness <= 0.08 ? 1 : Math.max(0, 1 - (openness - 0.08) / 0.16);
+  const effectiveGloss = toneSettings.gloss * glossOpenFade;
+  if (effectiveGloss > 0.01 && isVinylClearcoatEnabled()) {
     applyVinylClearcoat(
       ctx,
-      lipFillPath,
+      lipMask,
       lipBounds,
       glazeBlur,
-      toneSettings.gloss
+      effectiveGloss
     );
-  } else {
+  } else if (effectiveGloss > 0.01) {
     applyLegacyGloss(
       ctx,
-      lipFillPath,
+      lipMask,
       lipCenterX,
       lipWidth,
       lipHeight,
       upperLipY,
       lowerLipY,
       glazeBlur,
-      toneSettings.gloss
+      effectiveGloss
     );
   }
 
   // --- 5️⃣ Final soft overlay for natural blending ---
   ctx.save();
-  ctx.clip(lipFillPath, "evenodd");
+  ctx.clip(lipMask, "evenodd");
   ctx.globalCompositeOperation = "soft-light";
   ctx.filter = `blur(${Math.max(0.8, baseBlur * 1.25)}px)`;
   ctx.globalAlpha = 0.24;
   ctx.fillStyle = colorBlend;
-  ctx.fill(lipFillPath, "evenodd");
+  ctx.fill(lipMask, "evenodd");
   ctx.restore();
 }
