@@ -117,11 +117,71 @@
     {%- comment -%} MOBILE RESPONSIVE {%- endcomment -%}
     const MOBILE_BP = 768;
     let mobileShadeBar = null;
+    const MOBILE_SHADE_COLORS = {
+      "ruby vice": "#d40a39",
+      "clover club": "#af4b55",
+      barbados: "#845557",
+      temptation: "#af4c76",
+      stardust: "#f0c3aa",
+      ibiza: "#ff6e78",
+      chelsea: "#ae4468",
+      "sugar cane": "#b47862",
+      "mistique girl": "#bf1220",
+      kalahari: "#c25057",
+      "twilight zone": "#9a4957",
+      "peach cosmo": "#ae645b",
+    };
 
     function isMobileTryon() {
       return window.matchMedia(`(max-width: ${MOBILE_BP}px)`).matches;
     }
     lastViewportIsMobile = isMobileTryon();
+
+    function normalizeShadeName(value) {
+      return (value || "")
+        .toLowerCase()
+        .replace(/[_-]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function extractShadeName(label) {
+      const raw =
+        label?.dataset?.swatch?.trim() ||
+        label?.dataset?.variantTitle?.trim() ||
+        label?.textContent?.trim() ||
+        "Shade";
+
+      if (raw.includes(" - ")) {
+        const parts = raw.split(" - ").map((part) => part.trim()).filter(Boolean);
+        return parts[parts.length - 1] || raw;
+      }
+
+      return raw;
+    }
+
+    function resolveShadeColor(label) {
+      const shadeName = extractShadeName(label);
+      const mapped = MOBILE_SHADE_COLORS[normalizeShadeName(shadeName)];
+      if (mapped) return mapped;
+
+      const computed = window.getComputedStyle(label);
+      const swatchVar = computed.getPropertyValue("--swatch").trim();
+      if (swatchVar && !swatchVar.startsWith("var(")) {
+        return swatchVar;
+      }
+
+      const backgroundColor = computed.backgroundColor;
+      if (
+        backgroundColor &&
+        backgroundColor !== "rgba(0, 0, 0, 0)" &&
+        backgroundColor !== "transparent"
+      ) {
+        return backgroundColor;
+      }
+
+      return "#d9c7bf";
+    }
 
     function getColorSwatchLabels() {
       const form = document.querySelector('form[action="/cart/add"]') || document;
@@ -160,15 +220,30 @@
         const input = forId ? document.getElementById(forId) : null;
         if (!(input instanceof HTMLInputElement)) return;
 
+        const shadeName = extractShadeName(label);
+        const variantTitle =
+          label.dataset?.variantTitle?.trim() ||
+          label.dataset?.swatch?.trim() ||
+          label.textContent?.trim() ||
+          shadeName;
+        const shadeColor = resolveShadeColor(label);
+
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "tryon-mobile-shade";
         btn.dataset.for = forId || "";
-        btn.textContent =
-          label.dataset?.swatch?.trim() ||
-          label.dataset?.variantTitle?.trim() ||
-          label.textContent?.trim() ||
-          "Shade";
+        btn.setAttribute("aria-label", variantTitle);
+
+        const swatch = document.createElement("span");
+        swatch.className = "tryon-mobile-shade__swatch";
+        swatch.style.setProperty("--tryon-shade-color", shadeColor);
+
+        const text = document.createElement("span");
+        text.className = "tryon-mobile-shade__label";
+        text.textContent = shadeName.toUpperCase();
+
+        btn.appendChild(swatch);
+        btn.appendChild(text);
 
         btn.addEventListener("click", () => {
           label.click();
@@ -260,6 +335,15 @@
       return getViewportOverlapArea(el) / total;
     }
 
+    function hasViewportPresence(el, minRatio = 0) {
+      return (
+        !!el &&
+        el.isConnected &&
+        getViewportOverlapArea(el) > 0 &&
+        getViewportOverlapRatio(el) > minRatio
+      );
+    }
+
     function restoreTryonButtons() {
       const activeMediaSpace = pickBestMediaSpaceByOverlap();
       const encodedVariantTitle = encodeURIComponent(getVariantTitle() || "");
@@ -313,25 +397,27 @@
     function refreshCurrentMediaSpace() {
       if (!tryonOpen || isMobileTryon()) return;
 
+      const currentHasVisiblePresence = hasViewportPresence(currentMediaSpace);
+      const currentHasStrongPresence = hasViewportPresence(currentMediaSpace, 0.45);
+
       if (
         Date.now() < reanchorBlockedUntil &&
-        currentMediaSpace &&
-        currentMediaSpace.isConnected
+        currentHasStrongPresence
       ) {
         return;
       }
 
-      if (
-        currentMediaSpace &&
-        currentMediaSpace.isConnected &&
-        getViewportOverlapArea(currentMediaSpace) > 0 &&
-        getViewportOverlapRatio(currentMediaSpace) > 0.45
-      ) {
+      if (currentHasStrongPresence) {
         return;
       }
 
       const next = pickBestMediaSpaceByOverlap();
-      if (!next) return;
+      if (!next) {
+        if (!currentHasVisiblePresence) {
+          currentMediaSpace = null;
+        }
+        return;
+      }
       if (next === currentMediaSpace) return;
 
       currentMediaSpace = next;
@@ -340,6 +426,7 @@
 
     function getDesktopAnchorElement() {
       if (!currentMediaSpace || !currentMediaSpace.isConnected) return null;
+      if (!hasViewportPresence(currentMediaSpace)) return null;
       return currentMediaSpace;
     }
 
@@ -422,18 +509,13 @@
     function syncTryonPosition() {
       if (!tryonOpen || isMobileTryon()) return;
 
-      if (!currentMediaSpace || !currentMediaSpace.isConnected) {
-        refreshCurrentMediaSpace();
-      }
+      refreshCurrentMediaSpace();
       if (!currentMediaSpace) return;
 
       const anchorEl = getDesktopAnchorElement();
       if (!anchorEl) return;
 
-      const rect = fitRectToAspect(
-        anchorEl.getBoundingClientRect(),
-        tryonCameraAspect
-      );
+      const rect = anchorEl.getBoundingClientRect();
       const nextRect = {
         left: Math.round(rect.left),
         top: Math.round(rect.top),
@@ -536,7 +618,12 @@
           requestAnimationFrame(syncTryonPosition);
         }, 160);
       });
-      obs.observe(gallery, { childList: true, subtree: true });
+      obs.observe(gallery, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class", "style", "aria-hidden"],
+      });
     }
 
     const scheduleDesktopPositionSync = () => {
