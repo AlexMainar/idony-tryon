@@ -26,6 +26,15 @@ const CHEEK_MIRROR_MAP: Record<number, number> = {
   136: 365,
 };
 
+const TEMPLE_MIRROR_MAP: Record<number, number> = {
+  400: 176,
+  379: 149,
+  365: 136,
+  397: 172,
+  288: 58,
+  361: 132,
+};
+
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
@@ -33,6 +42,12 @@ const normalizeRegion = (region?: RegionDefinition | null): number[] | null => {
   if (!region) return null;
   if (Array.isArray(region[0])) return (region as number[][])[0];
   return region as number[];
+};
+
+const normalizeRegionPolygons = (region?: RegionDefinition | null): number[][] => {
+  if (!region) return [];
+  if (Array.isArray(region[0])) return region as number[][];
+  return [region as number[]];
 };
 
 const parseHexColor = (hex: string) => {
@@ -256,9 +271,158 @@ const buildCheekBandPath = (
   };
 };
 
-const mirrorRegion = (indices: number[]) => {
-  const mirrored = indices.map((index) => CHEEK_MIRROR_MAP[index]);
+const mirrorRegion = (indices: number[], map: Record<number, number>) => {
+  const mirrored = indices.map((index) => map[index]);
   return mirrored.every(Boolean) ? mirrored : null;
+};
+
+const buildRegionVariants = (name: string, region?: RegionDefinition | null) => {
+  const polygons = normalizeRegionPolygons(region);
+  if (!polygons.length) return [];
+
+  const mirrorMap =
+    name === "cheekbones" || name === "cheeks"
+      ? CHEEK_MIRROR_MAP
+      : name === "temples"
+        ? TEMPLE_MIRROR_MAP
+        : null;
+
+  if (!mirrorMap || polygons.length !== 1) return polygons;
+
+  const mirrored = mirrorRegion(polygons[0], mirrorMap);
+  return mirrored ? [...polygons, mirrored] : polygons;
+};
+
+type BuiltArea = NonNullable<ReturnType<typeof buildAreaPath>>;
+
+type SoftPathMask = {
+  bounds: BuiltArea;
+  featherPx: number;
+};
+
+type GradientSource = CanvasGradient | ((targetCtx: CanvasRenderingContext2D) => CanvasGradient);
+
+const buildAreaFromPoints = (points: Point[]): BuiltArea | null => {
+  if (points.length < 3) return null;
+
+  const path = new Path2D();
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let sumX = 0;
+  let sumY = 0;
+
+  points.forEach((point, index) => {
+    sumX += point.x;
+    sumY += point.y;
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+
+    if (index === 0) path.moveTo(point.x, point.y);
+    else path.lineTo(point.x, point.y);
+  });
+
+  path.closePath();
+
+  return {
+    path,
+    points,
+    minX,
+    minY,
+    maxX,
+    maxY,
+    centerX: sumX / points.length,
+    centerY: sumY / points.length,
+    areaWidth: Math.max(1, maxX - minX),
+    areaHeight: Math.max(1, maxY - minY),
+  };
+};
+
+const buildDreamPaintCheekArea = (built: BuiltArea, faceCenterX: number) => {
+  const side = built.centerX < faceCenterX ? -1 : 1;
+  const rotation = side < 0 ? 0.42 : -0.42;
+  const cos = Math.cos(rotation);
+  const sin = Math.sin(rotation);
+  const centerX = built.centerX - side * built.areaWidth * 0.12;
+  const centerY = built.centerY + built.areaHeight * 0.36;
+  const rx = built.areaWidth * 0.78;
+  const ry = built.areaHeight * 1.04;
+  const points: Point[] = [];
+
+  for (let i = 0; i < 32; i += 1) {
+    const angle = (i / 32) * Math.PI * 2;
+    const yWeight = Math.sin(angle);
+    const localX = Math.cos(angle) * rx * (yWeight > 0 ? 1.02 : 0.92);
+    const localY = yWeight * ry * (yWeight > 0 ? 1.16 : 0.82);
+
+    points.push({
+      x: centerX + localX * cos - localY * sin,
+      y: centerY + localX * sin + localY * cos,
+    });
+  }
+
+  return buildAreaFromPoints(points) ?? built;
+};
+
+const resolveGradient = (
+  gradient: GradientSource,
+  targetCtx: CanvasRenderingContext2D
+) => (typeof gradient === "function" ? gradient(targetCtx) : gradient);
+
+const renderWithSoftPathMask = (
+  ctx: CanvasRenderingContext2D,
+  path: Path2D,
+  composite: GlobalCompositeOperation,
+  contentBounds: { minX: number; minY: number; maxX: number; maxY: number },
+  mask: SoftPathMask,
+  drawContent: (layerCtx: CanvasRenderingContext2D) => void
+) => {
+  const pad = Math.ceil(Math.max(8, mask.featherPx * 3));
+  const minX = Math.floor(Math.min(contentBounds.minX, mask.bounds.minX) - pad);
+  const minY = Math.floor(Math.min(contentBounds.minY, mask.bounds.minY) - pad);
+  const maxX = Math.ceil(Math.max(contentBounds.maxX, mask.bounds.maxX) + pad);
+  const maxY = Math.ceil(Math.max(contentBounds.maxY, mask.bounds.maxY) + pad);
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+
+  const layerCanvas = document.createElement("canvas");
+  layerCanvas.width = width;
+  layerCanvas.height = height;
+  const layerCtx = layerCanvas.getContext("2d");
+  if (!layerCtx) return;
+
+  layerCtx.save();
+  layerCtx.translate(-minX, -minY);
+  drawContent(layerCtx);
+  layerCtx.restore();
+
+  const maskCanvas = document.createElement("canvas");
+  maskCanvas.width = width;
+  maskCanvas.height = height;
+  const maskCtx = maskCanvas.getContext("2d");
+  if (!maskCtx) return;
+
+  maskCtx.save();
+  maskCtx.translate(-minX, -minY);
+  maskCtx.filter = `blur(${mask.featherPx}px)`;
+  maskCtx.fillStyle = "rgba(255,255,255,1)";
+  maskCtx.fill(path);
+  maskCtx.restore();
+
+  layerCtx.save();
+  layerCtx.globalCompositeOperation = "destination-in";
+  layerCtx.drawImage(maskCanvas, 0, 0);
+  layerCtx.restore();
+
+  ctx.save();
+  ctx.globalCompositeOperation = composite;
+  ctx.globalAlpha = 1;
+  ctx.filter = "none";
+  ctx.drawImage(layerCanvas, minX, minY);
+  ctx.restore();
 };
 
 const renderEllipseLayer = (
@@ -269,8 +433,41 @@ const renderEllipseLayer = (
   composite: GlobalCompositeOperation,
   blur: number,
   ellipse: { x: number; y: number; rx: number; ry: number; rotation: number },
-  hexToRgba: (hex: string, opacity: number) => string
+  hexToRgba: (hex: string, opacity: number) => string,
+  mask?: SoftPathMask
 ) => {
+  if (mask) {
+    const blurPad = blur + 2;
+    renderWithSoftPathMask(
+      ctx,
+      path,
+      composite,
+      {
+        minX: ellipse.x - ellipse.rx - blurPad,
+        minY: ellipse.y - ellipse.ry - blurPad,
+        maxX: ellipse.x + ellipse.rx + blurPad,
+        maxY: ellipse.y + ellipse.ry + blurPad,
+      },
+      mask,
+      (layerCtx) => {
+        layerCtx.filter = `blur(${blur}px)`;
+        layerCtx.fillStyle = hexToRgba(color, clamp01(opacity));
+        layerCtx.beginPath();
+        layerCtx.ellipse(
+          ellipse.x,
+          ellipse.y,
+          Math.max(1, ellipse.rx),
+          Math.max(1, ellipse.ry),
+          ellipse.rotation,
+          0,
+          Math.PI * 2
+        );
+        layerCtx.fill();
+      }
+    );
+    return;
+  }
+
   ctx.save();
   ctx.clip(path);
   ctx.globalCompositeOperation = composite;
@@ -293,16 +490,39 @@ const renderEllipseLayer = (
 const renderGradientLayer = (
   ctx: CanvasRenderingContext2D,
   path: Path2D,
-  gradient: CanvasGradient,
+  gradient: GradientSource,
   composite: GlobalCompositeOperation,
   blur: number,
-  fillBox: { x: number; y: number; width: number; height: number }
+  fillBox: { x: number; y: number; width: number; height: number },
+  mask?: SoftPathMask
 ) => {
+  if (mask) {
+    const blurPad = blur + 2;
+    renderWithSoftPathMask(
+      ctx,
+      path,
+      composite,
+      {
+        minX: fillBox.x - blurPad,
+        minY: fillBox.y - blurPad,
+        maxX: fillBox.x + fillBox.width + blurPad,
+        maxY: fillBox.y + fillBox.height + blurPad,
+      },
+      mask,
+      (layerCtx) => {
+        layerCtx.filter = `blur(${blur}px)`;
+        layerCtx.fillStyle = resolveGradient(gradient, layerCtx);
+        layerCtx.fillRect(fillBox.x, fillBox.y, fillBox.width, fillBox.height);
+      }
+    );
+    return;
+  }
+
   ctx.save();
   ctx.clip(path);
   ctx.globalCompositeOperation = composite;
   ctx.filter = `blur(${blur}px)`;
-  ctx.fillStyle = gradient;
+  ctx.fillStyle = resolveGradient(gradient, ctx);
   ctx.fillRect(fillBox.x, fillBox.y, fillBox.width, fillBox.height);
   ctx.restore();
 };
@@ -342,23 +562,38 @@ const renderCheekBlush = (
   const satinLift = isDreamPaint
     ? mixHexColors(productColor, "#fff7f8", 0.08)
     : mixHexColors(productColor, "#fff4f6", 0.1);
+  const softCoreMask: SoftPathMask = {
+    bounds: built,
+    featherPx: isDreamPaint
+      ? Math.max(6, Math.min(13, built.areaWidth * 0.036))
+      : Math.max(3, Math.min(6, built.areaWidth * 0.018)),
+  };
+  const softOuterMask: SoftPathMask = {
+    bounds: built,
+    featherPx: isDreamPaint
+      ? Math.max(22, Math.min(44, built.areaWidth * 0.132))
+      : Math.max(9, Math.min(18, built.areaWidth * 0.055)),
+  };
 
-  const veilGrad = ctx.createLinearGradient(
-    lerp(innerX, outerX, 0.18),
-    built.minY,
-    lerp(innerX, outerX, 0.84),
-    built.maxY
-  );
-  veilGrad.addColorStop(0, "transparent");
-  veilGrad.addColorStop(0.22, hexToRgba(creamVeil, baseOpacity * 0.12));
-  veilGrad.addColorStop(0.56, hexToRgba(creamVeil, baseOpacity * 0.2));
-  veilGrad.addColorStop(0.82, hexToRgba(creamBody, baseOpacity * 0.1));
-  veilGrad.addColorStop(1, "transparent");
+  const createVeilGradient = (targetCtx: CanvasRenderingContext2D) => {
+    const veilGrad = targetCtx.createLinearGradient(
+      lerp(innerX, outerX, 0.18),
+      built.minY,
+      lerp(innerX, outerX, 0.84),
+      built.maxY
+    );
+    veilGrad.addColorStop(0, "transparent");
+    veilGrad.addColorStop(0.2, hexToRgba(creamVeil, baseOpacity * (isDreamPaint ? 0.18 : 0.12)));
+    veilGrad.addColorStop(0.54, hexToRgba(creamVeil, baseOpacity * (isDreamPaint ? 0.3 : 0.2)));
+    veilGrad.addColorStop(0.84, hexToRgba(creamBody, baseOpacity * (isDreamPaint ? 0.16 : 0.1)));
+    veilGrad.addColorStop(1, "transparent");
+    return veilGrad;
+  };
 
   renderGradientLayer(
     ctx,
     built.path,
-    veilGrad,
+    createVeilGradient,
     "soft-light",
     Math.max(isDreamPaint ? 16 : 18, built.areaWidth * (isDreamPaint ? 0.082 : 0.09)),
     {
@@ -366,48 +601,51 @@ const renderCheekBlush = (
       y: built.minY - built.areaHeight * 0.4,
       width: built.areaWidth * 1.6,
       height: built.areaHeight * 1.8,
-    }
+    },
+    softOuterMask
   );
 
   renderEllipseLayer(
     ctx,
     built.path,
     creamBase,
-    baseOpacity * (isDreamPaint ? 0.11 : 0.16),
+    baseOpacity * (isDreamPaint ? 0.18 : 0.16),
     "multiply",
-    Math.max(isDreamPaint ? 12 : 14, built.areaWidth * (isDreamPaint ? 0.062 : 0.072)),
+    Math.max(isDreamPaint ? 16 : 14, built.areaWidth * (isDreamPaint ? 0.084 : 0.072)),
     {
       x: lerp(innerX, outerX, isDreamPaint ? 0.64 : 0.58),
       y: bodyY,
-      rx: built.areaWidth * (isDreamPaint ? 0.26 : 0.3),
-      ry: built.areaHeight * (isDreamPaint ? 0.18 : 0.2),
+      rx: built.areaWidth * (isDreamPaint ? 0.34 : 0.3),
+      ry: built.areaHeight * (isDreamPaint ? 0.24 : 0.2),
       rotation,
     },
-    hexToRgba
+    hexToRgba,
+    softCoreMask
   );
 
   renderEllipseLayer(
     ctx,
     built.path,
     creamBody,
-    baseOpacity * (isDreamPaint ? 0.34 : 0.38),
+    baseOpacity * (isDreamPaint ? 0.54 : 0.38),
     "soft-light",
-    Math.max(isDreamPaint ? 18 : 22, built.areaWidth * (isDreamPaint ? 0.094 : 0.108)),
+    Math.max(isDreamPaint ? 28 : 22, built.areaWidth * (isDreamPaint ? 0.138 : 0.108)),
     {
       x: lerp(innerX, outerX, isDreamPaint ? 0.58 : 0.56),
       y: veilY,
-      rx: built.areaWidth * (isDreamPaint ? 0.54 : 0.58),
-      ry: built.areaHeight * (isDreamPaint ? 0.34 : 0.38),
+      rx: built.areaWidth * (isDreamPaint ? 0.68 : 0.58),
+      ry: built.areaHeight * (isDreamPaint ? 0.48 : 0.38),
       rotation,
     },
-    hexToRgba
+    hexToRgba,
+    softOuterMask
   );
 
   renderEllipseLayer(
     ctx,
     built.path,
     creamBloom,
-    baseOpacity * (isDreamPaint ? 0.1 : 0.14),
+    baseOpacity * (isDreamPaint ? 0.14 : 0.14),
     "screen",
     Math.max(isDreamPaint ? 14 : 18, built.areaWidth * (isDreamPaint ? 0.072 : 0.088)),
     {
@@ -417,7 +655,8 @@ const renderCheekBlush = (
       ry: built.areaHeight * 0.2,
       rotation,
     },
-    hexToRgba
+    hexToRgba,
+    softCoreMask
   );
 
   renderEllipseLayer(
@@ -434,7 +673,8 @@ const renderCheekBlush = (
       ry: built.areaHeight * (isDreamPaint ? 0.13 : 0.15),
       rotation,
     },
-    hexToRgba
+    hexToRgba,
+    softCoreMask
   );
 };
 
@@ -473,6 +713,95 @@ const renderNoseTint = (
       width: built.areaWidth * 3,
       height: built.areaHeight * 3,
     }
+  );
+};
+
+const renderSoftAreaBlush = (
+  ctx: CanvasRenderingContext2D,
+  built: BuiltArea | null,
+  productColor: string,
+  baseOpacity: number,
+  hexToRgba: (hex: string, opacity: number) => string,
+  intensity = 1
+) => {
+  if (!built) return;
+
+  const softCoreMask: SoftPathMask = {
+    bounds: built,
+    featherPx: Math.max(5, Math.min(14, built.areaWidth * 0.07)),
+  };
+  const softOuterMask: SoftPathMask = {
+    bounds: built,
+    featherPx: Math.max(10, Math.min(28, built.areaWidth * 0.14)),
+  };
+  const areaBase = mixHexColors(productColor, "#a53d5b", 0.12);
+  const areaBody = mixHexColors(productColor, "#ff9aaa", 0.16);
+  const areaGlow = mixHexColors(productColor, "#ffd9df", 0.16);
+
+  const areaGrad = (targetCtx: CanvasRenderingContext2D) => {
+    const gradient = targetCtx.createRadialGradient(
+      built.centerX,
+      built.centerY,
+      Math.max(1, Math.min(built.areaWidth, built.areaHeight) * 0.08),
+      built.centerX,
+      built.centerY,
+      Math.max(built.areaWidth, built.areaHeight) * 0.92
+    );
+    gradient.addColorStop(0, hexToRgba(areaBody, baseOpacity * 0.28 * intensity));
+    gradient.addColorStop(0.54, hexToRgba(areaBody, baseOpacity * 0.16 * intensity));
+    gradient.addColorStop(1, "transparent");
+    return gradient;
+  };
+
+  renderGradientLayer(
+    ctx,
+    built.path,
+    areaGrad,
+    "soft-light",
+    Math.max(8, built.areaWidth * 0.1),
+    {
+      x: built.minX - built.areaWidth * 0.32,
+      y: built.minY - built.areaHeight * 0.32,
+      width: built.areaWidth * 1.64,
+      height: built.areaHeight * 1.64,
+    },
+    softOuterMask
+  );
+
+  renderEllipseLayer(
+    ctx,
+    built.path,
+    areaBase,
+    baseOpacity * 0.12 * intensity,
+    "multiply",
+    Math.max(5, built.areaWidth * 0.06),
+    {
+      x: built.centerX,
+      y: built.centerY,
+      rx: built.areaWidth * 0.38,
+      ry: built.areaHeight * 0.34,
+      rotation: 0,
+    },
+    hexToRgba,
+    softCoreMask
+  );
+
+  renderEllipseLayer(
+    ctx,
+    built.path,
+    areaGlow,
+    baseOpacity * 0.1 * intensity,
+    "screen",
+    Math.max(7, built.areaWidth * 0.08),
+    {
+      x: built.centerX,
+      y: lerp(built.minY, built.maxY, 0.32),
+      rx: built.areaWidth * 0.32,
+      ry: built.areaHeight * 0.2,
+      rotation: 0,
+    },
+    hexToRgba,
+    softOuterMask
   );
 };
 
@@ -551,11 +880,11 @@ export function renderBlush(
   height: number,
   hexToRgba: (hex: string, opacity: number) => string
 ) {
-  const baseOpacity = clamp01(productData.opacity ?? 0.55);
   const finish: BlushFinish =
     productData.display_name?.toLowerCase().includes("dream paint blush")
       ? "dream_paint"
       : "flush_bloom";
+  const baseOpacity = clamp01((productData.opacity ?? 0.55) * (finish === "dream_paint" ? 1.12 : 1));
 
   const leftTemple = landmarks[234];
   const rightTemple = landmarks[454];
@@ -585,9 +914,11 @@ export function renderBlush(
 
   if (cheekMasks.length) {
     cheekMasks.forEach((built) => {
+      const targetBuilt =
+        finish === "dream_paint" ? buildDreamPaintCheekArea(built, faceCenterX) : built;
       renderCheekBlush(
         ctx,
-        built,
+        targetBuilt,
         faceCenterX,
         productData.color,
         baseOpacity,
@@ -600,14 +931,16 @@ export function renderBlush(
     if (!cheekRegion) return;
 
     const cheekRegions = [cheekRegion];
-    const mirroredCheek = mirrorRegion(cheekRegion);
+    const mirroredCheek = mirrorRegion(cheekRegion, CHEEK_MIRROR_MAP);
     if (mirroredCheek) cheekRegions.push(mirroredCheek);
 
     cheekRegions.forEach((indices) => {
       const built = buildAreaPath(indices, landmarks, width, height);
+      const targetBuilt =
+        built && finish === "dream_paint" ? buildDreamPaintCheekArea(built, faceCenterX) : built;
       renderCheekBlush(
         ctx,
-        built,
+        targetBuilt,
         faceCenterX,
         productData.color,
         baseOpacity,
@@ -618,10 +951,41 @@ export function renderBlush(
   }
 
   const noseRegion = normalizeRegion(productData.regions["nose"]);
-  if (finish === "flush_bloom" && noseRegion) {
+  if (noseRegion) {
     const noseBuilt = buildAreaPath(noseRegion, landmarks, width, height);
     renderNoseTint(ctx, noseBuilt, productData.color, baseOpacity, hexToRgba);
   }
+
+  Object.entries(productData.regions ?? {}).forEach(([name, region]) => {
+    if (
+      name === "cheeks" ||
+      name === "cheekbones" ||
+      name === "nose" ||
+      name === "lips_outer" ||
+      name === "lips_inner"
+    ) {
+      return;
+    }
+
+    buildRegionVariants(name, region).forEach((indices) => {
+      const built = buildAreaPath(indices, landmarks, width, height);
+      if (!built) return;
+
+      if (name === "nose_contour") {
+        renderSoftAreaBlush(ctx, built, productData.color, baseOpacity, hexToRgba, 0.58);
+        return;
+      }
+
+      if (name === "eyelids") {
+        renderSoftAreaBlush(ctx, built, productData.color, baseOpacity, hexToRgba, 0.45);
+        return;
+      }
+
+      if (name === "temples") {
+        renderSoftAreaBlush(ctx, built, productData.color, baseOpacity, hexToRgba, 0.5);
+      }
+    });
+  });
 
   const lipsOuter = normalizeRegion(productData.regions["lips_outer"]);
   if (lipsOuter) {

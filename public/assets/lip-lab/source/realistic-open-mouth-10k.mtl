@@ -1,0 +1,14 @@
+# Blender 4.3.2 MTL File: 'startup_scene.blend'
+# www.blender.org
+
+newmtl Retopo_neural_node_aee24215-7516-40c6-9635-2fbc59adf8c4_mat
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd 5f8c3268-3e91-4818-b961-06394e59c354_texture.png
+map_Ns 5f8c3268-3e91-4818-b961-06394e59c354_Roughness.png
+map_refl 5f8c3268-3e91-4818-b961-06394e59c354_Metallic.png
+map_Bump -bm 1.000000 5f8c3268-3e91-4818-b961-06394e59c354_texture_NormalGL.png

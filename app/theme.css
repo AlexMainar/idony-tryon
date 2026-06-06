@@ -22075,44 +22075,97 @@ body.overflow-hidden .floating-add-to-cart-bar {
 
 /* ================= MOBILE ================= */
 
+#tryon-mobile-shades {
+    display: none;
+}
+
 @media (max-width: 768px) {
     body.tryon-mobile-open {
         overflow: hidden;
     }
 
-    #tryon-mobile-shades {
+    body.tryon-mobile-open #tryon-mobile-shades {
+        display: block;
         position: fixed;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        padding: 6px 8px 8px;
+        left: 50%;
+        bottom: 12px;
+        transform: translateX(-50%);
+        width: fit-content;
+        max-width: calc(100vw - 36px);
+        padding: 0;
         z-index: 2147483647;
         pointer-events: auto;
-        box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        backdrop-filter: none;
     }
 
-    .tryon-mobile-shades__track {
+    #tryon-mobile-shades .tryon-mobile-shades__track {
         display: flex;
-        gap: 3px;
+        gap: 10px;
+        align-items: flex-start;
         justify-content: center;
         overflow-x: auto;
-        padding: 4px 2px;
+        padding: 1px 0 0;
         -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
     }
 
-    .tryon-mobile-shade {
-        border: 1px solid #111;
-        background: #fff;
+    #tryon-mobile-shades .tryon-mobile-shades__track::-webkit-scrollbar {
+        display: none;
+    }
+
+    #tryon-mobile-shades .tryon-mobile-shade {
+        appearance: none;
+        border: 0;
+        background: transparent;
         color: #111;
-        padding: 8px 10px;
-        white-space: nowrap;
-        font-size: 12px;
-        text-transform: uppercase;
+        padding: 0;
+        margin: 0;
+        min-width: 82px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        transform: translateY(0);
+        transition: transform 0.2s ease;
     }
 
-    .tryon-mobile-shade.is-selected {
+    #tryon-mobile-shades .tryon-mobile-shade__swatch {
+        --tryon-shade-color: #d9c7bf;
+        width: 42px;
+        height: 42px;
+        border-radius: 999px;
+        background: var(--tryon-shade-color);
+        border: 0;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+        flex: 0 0 auto;
+    }
+
+    #tryon-mobile-shades .tryon-mobile-shade__label {
+        min-width: 100%;
+        padding: 7px 10px 6px;
+        border: 1.5px solid #111;
+        border-radius: 999px;
         background: #111;
         color: #fff;
+        text-align: center;
+        white-space: nowrap;
+        font-family: var(--FONT-STACK-BUTTON);
+        font-size: 9px;
+        font-weight: 700;
+        line-height: 1;
+        letter-spacing: 0.01em;
+    }
+
+    #tryon-mobile-shades .tryon-mobile-shade.is-selected {
+        transform: translateY(1);
+    }
+
+    #tryon-mobile-shades .tryon-mobile-shade.is-selected .tryon-mobile-shade__swatch {
+        box-shadow: 0 0 0 1.5px #111;
     }
 
 }

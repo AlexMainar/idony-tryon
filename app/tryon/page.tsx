@@ -14,7 +14,7 @@ export default function TryOnPage() {
     const landmarkerPreloadStartAt = performance.now();
     console.log("[TRYON PERF] page effect start");
 
-    void initFaceLandmarker()
+    void initFaceLandmarker("IMAGE")
       .then(() => {
         console.log("[TRYON PERF] face landmarker preload done", {
           ms: Math.round(performance.now() - landmarkerPreloadStartAt),

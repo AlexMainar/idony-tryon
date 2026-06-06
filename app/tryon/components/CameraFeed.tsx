@@ -53,7 +53,12 @@ export default function CameraFeed({
 
             try {
                 stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "user" }
+                    video: {
+                        facingMode: "user",
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                        frameRate: { ideal: 30, max: 30 }
+                    }
                 });
 
                 if (!videoRef.current || cancelled) {

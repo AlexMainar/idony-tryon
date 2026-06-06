@@ -1,0 +1,94 @@
+{
+  "generator": "idony lip-lab band export",
+  "exportKey": "canonical",
+  "sourceCut": "clean-tight-profiled",
+  "sourceFaceCount": 3823,
+  "splitY": -0.0012644976377487183,
+  "outputs": {
+    "combined": {
+      "url": "/assets/lip-lab/canonical/realistic-open-mouth-lips-canonical.glb",
+      "faceCount": 3611,
+      "vertexCount": 2237,
+      "componentIds": [
+        "canonical-component-01-upper",
+        "canonical-component-02-lower"
+      ]
+    },
+    "upper": {
+      "url": "/assets/lip-lab/canonical/realistic-open-mouth-lips-canonical-upper.glb",
+      "faceCount": 2544,
+      "vertexCount": 1631,
+      "componentIds": [
+        "canonical-component-01-upper"
+      ]
+    },
+    "lower": {
+      "url": "/assets/lip-lab/canonical/realistic-open-mouth-lips-canonical-lower.glb",
+      "faceCount": 1067,
+      "vertexCount": 606,
+      "componentIds": [
+        "canonical-component-02-lower"
+      ]
+    }
+  },
+  "components": [
+    {
+      "id": "canonical-component-01-upper",
+      "band": "upper",
+      "faceCount": 2544,
+      "vertexCount": 1631,
+      "centroid": [
+        0.16999958059382908,
+        0.2957832481115965,
+        -0.008895584006675597
+      ],
+      "bounds": {
+        "min": [
+          0.0009130000253207982,
+          0.11032457649707794,
+          -0.4579460024833679
+        ],
+        "max": [
+          0.36593198776245117,
+          0.4728800058364868,
+          0.46048200130462646
+        ]
+      },
+      "size": [
+        0.3650189877371304,
+        0.3625554293394089,
+        0.9184280037879944
+      ],
+      "url": "/assets/lip-lab/canonical/components/canonical-component-01-upper.glb"
+    },
+    {
+      "id": "canonical-component-02-lower",
+      "band": "lower",
+      "faceCount": 1067,
+      "vertexCount": 606,
+      "centroid": [
+        0.11936920800049583,
+        -0.277299435028542,
+        0.0035250199882176448
+      ],
+      "bounds": {
+        "min": [
+          0.005859000142663717,
+          -0.47540900111198425,
+          -0.424439013004303
+        ],
+        "max": [
+          0.29676300287246704,
+          -0.04920262470841408,
+          0.428178995847702
+        ]
+      },
+      "size": [
+        0.2909040027298033,
+        0.4262063764035702,
+        0.852618008852005
+      ],
+      "url": "/assets/lip-lab/canonical/components/canonical-component-02-lower.glb"
+    }
+  ]
+}

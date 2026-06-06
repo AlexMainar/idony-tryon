@@ -93,6 +93,7 @@
     let tryonOpen = false;
     let mutationSyncTimeout = null;
     let variantSyncTimeout = null;
+    let variantSettlingSyncTimeouts = [];
     let reanchorBlockedUntil = 0;
     let lastRect = null;
     let tryonCameraAspect = null;
@@ -102,14 +103,99 @@
       console.log("❌ tryon-root missing");
       return;
     }
+    const PRODUCT_SECTION =
+      document.getElementById({{ section_id | json }}) ||
+      TRYON_ROOT.closest(".shopify-section--product") ||
+      document;
+    const queryWithinSection = (selector) => PRODUCT_SECTION.querySelector(selector);
+    const queryAllWithinSection = (selector) =>
+      Array.from(PRODUCT_SECTION.querySelectorAll(selector));
     TRYON_ROOT.style.display = "none";
     TRYON_ROOT.style.pointerEvents = "none";
     TRYON_ROOT.style.overflow = "hidden";
     TRYON_ROOT.style.background = "#000";
 
     const getIframe = () => document.querySelector("#tryon-frame");
+    const TRYON_IFRAME_BASE = "https://idonytryon.eu.ngrok.io/tryon";
+
+    function getTryonDebugParamsFromPage() {
+      const pageParams = new URLSearchParams(window.location.search);
+      const debugParams = new URLSearchParams();
+      const rawSearch = (window.location.search || "").toLowerCase();
+
+      const lipdebug = pageParams.get("lipdebug");
+      if (lipdebug) debugParams.set("lipdebug", lipdebug);
+      const debug = pageParams.get("debug");
+      if (debug) debugParams.set("debug", debug);
+      const lipsource = pageParams.get("lipsource");
+      if (lipsource) debugParams.set("lipsource", lipsource);
+      const lipmode = pageParams.get("lipmode");
+      if (lipmode) debugParams.set("lipmode", lipmode);
+
+      // Tolerate malformed URLs like ?variant=123?lipdebug=1 or ?variant=123lipdebug=raw
+      if (!debugParams.has("lipdebug") && rawSearch.includes("lipdebug=1")) {
+        debugParams.set("lipdebug", "1");
+      }
+      if (!debugParams.has("lipdebug") && rawSearch.includes("lipdebug=true")) {
+        debugParams.set("lipdebug", "true");
+      }
+      if (!debugParams.has("lipdebug") && rawSearch.includes("lipdebug=raw")) {
+        debugParams.set("lipdebug", "raw");
+      }
+      if (!debugParams.has("lipdebug") && rawSearch.includes("lipdebug=image")) {
+        debugParams.set("lipdebug", "image");
+      }
+      if (!debugParams.has("debug") && rawSearch.includes("debug=lip")) {
+        debugParams.set("debug", "lip");
+      }
+      if (!debugParams.has("debug") && rawSearch.includes("debug=lipraw")) {
+        debugParams.set("debug", "lipraw");
+      }
+      if (!debugParams.has("debug") && rawSearch.includes("debug=lipimage")) {
+        debugParams.set("debug", "lipimage");
+      }
+      if (!debugParams.has("lipsource") && rawSearch.includes("lipsource=image")) {
+        debugParams.set("lipsource", "image");
+      }
+      if (!debugParams.has("lipmode") && rawSearch.includes("lipmode=image")) {
+        debugParams.set("lipmode", "image");
+      }
+      if (!debugParams.has("debug") && rawSearch.includes("debug=true")) {
+        debugParams.set("debug", "true");
+      }
+
+      return debugParams;
+    }
+
+    function buildTryonIframeSrc(handle, variantTitle) {
+      const params = new URLSearchParams();
+      params.set("handle", handle || "");
+      params.set("variant", variantTitle || "");
+      const debugParams = getTryonDebugParamsFromPage();
+      debugParams.forEach((value, key) => params.set(key, value));
+      return `${TRYON_IFRAME_BASE}?${params.toString()}`;
+    }
+
+    function addIframeCacheBust(src) {
+      try {
+        const url = new URL(src, window.location.origin);
+        url.searchParams.set("_ts", String(Date.now()));
+        return url.toString();
+      } catch (_) {
+        return `${src}${src.includes("?") ? "&" : "?"}_ts=${Date.now()}`;
+      }
+    }
+
+    function shouldForceTryonIframeReload() {
+      return (
+        TRYON_IFRAME_BASE.includes("ngrok") ||
+        TRYON_IFRAME_BASE.includes("localhost") ||
+        TRYON_IFRAME_BASE.includes("127.0.0.1")
+      );
+    }
+
     const tryonButtonTemplate = (() => {
-      const btn = document.querySelector("[data-tryon-button]");
+      const btn = queryWithinSection("[data-tryon-button]");
       return btn instanceof HTMLButtonElement ? btn.cloneNode(true) : null;
     })();
     let lastViewportIsMobile = false;
@@ -123,12 +209,12 @@
       barbados: "#845557",
       temptation: "#af4c76",
       stardust: "#f0c3aa",
-      ibiza: "#ff6e78",
+      ibiza: "#ff5f70",
       chelsea: "#ae4468",
       "sugar cane": "#b47862",
       "mistique girl": "#bf1220",
       kalahari: "#c25057",
-      "twilight zone": "#9a4957",
+      "twilight zone": "#b75a76",
       "peach cosmo": "#ae645b",
     };
 
@@ -184,10 +270,10 @@
     }
 
     function getColorSwatchLabels() {
-      const form = document.querySelector('form[action="/cart/add"]') || document;
+      const form = queryWithinSection('form[action="/cart/add"]') || PRODUCT_SECTION;
       const radios = Array.from(form.querySelectorAll('input[type="radio"][id]'));
       return radios
-        .map((input) => document.querySelector(`label[for="${CSS.escape(input.id)}"]`))
+        .map((input) => queryWithinSection(`label[for="${CSS.escape(input.id)}"]`))
         .filter((label) =>
           label &&
           (label.classList.contains("swatch__label") ||
@@ -273,13 +359,13 @@
 
     function pickBestMediaSpaceByOverlap() {
       const activeSpaces = [
-        ...document.querySelectorAll(
+        ...PRODUCT_SECTION.querySelectorAll(
           ".product-gallery__media-slide:not(.media--hidden) .product-gallery__media-space"
         ),
       ];
       const spaces = activeSpaces.length
         ? activeSpaces
-        : [...document.querySelectorAll(".product-gallery__media-space")];
+        : [...PRODUCT_SECTION.querySelectorAll(".product-gallery__media-space")];
       const vw = window.innerWidth;
       const vh = window.innerHeight;
 
@@ -344,10 +430,34 @@
       );
     }
 
+    function clearVariantSettlingSyncs() {
+      variantSettlingSyncTimeouts.forEach((timeoutId) => {
+        clearTimeout(timeoutId);
+      });
+      variantSettlingSyncTimeouts = [];
+    }
+
+    function scheduleVariantSettlingSyncs() {
+      clearVariantSettlingSyncs();
+      if (!tryonOpen || isMobileTryon()) return;
+
+      [120, 260, 460, 760].forEach((delay) => {
+        const timeoutId = window.setTimeout(() => {
+          variantSettlingSyncTimeouts = variantSettlingSyncTimeouts.filter(
+            (id) => id !== timeoutId
+          );
+          if (!tryonOpen || isMobileTryon()) return;
+          refreshCurrentMediaSpace(delay >= 460);
+          requestAnimationFrame(syncTryonPosition);
+        }, delay);
+        variantSettlingSyncTimeouts.push(timeoutId);
+      });
+    }
+
     function restoreTryonButtons() {
       const activeMediaSpace = pickBestMediaSpaceByOverlap();
       const encodedVariantTitle = encodeURIComponent(getVariantTitle() || "");
-      const liveTemplate = document.querySelector("[data-tryon-button]");
+      const liveTemplate = queryWithinSection("[data-tryon-button]");
       const templateButton =
         liveTemplate instanceof HTMLButtonElement
           ? liveTemplate
@@ -372,7 +482,7 @@
         }
       }
 
-      const overlays = document.querySelectorAll(".tryon-overlay");
+      const overlays = queryAllWithinSection(".tryon-overlay");
       overlays.forEach((overlay) => {
         if (!(overlay instanceof HTMLElement)) return;
         overlay.style.display = "block";
@@ -381,7 +491,7 @@
         overlay.style.pointerEvents = "auto";
       });
 
-      const buttons = document.querySelectorAll("[data-tryon-button]");
+      const buttons = queryAllWithinSection("[data-tryon-button]");
       buttons.forEach((button) => {
         if (!(button instanceof HTMLButtonElement)) return;
         if (encodedVariantTitle) {
@@ -393,40 +503,73 @@
         button.style.pointerEvents = "auto";
       });
     }
-    
-    function refreshCurrentMediaSpace() {
+
+    function isDesktopMediaSpaceUsable(el) {
+      if (!el || !el.isConnected) return false;
+      const slide = el.closest(".product-gallery__media-slide");
+      if (slide instanceof HTMLElement && slide.classList.contains("media--hidden")) {
+        return false;
+      }
+      const rect = el.getBoundingClientRect();
+      return rect.width > 40 && rect.height > 40;
+    }
+
+    function getStableDesktopAnchor() {
+      const viewport = queryWithinSection(".product-gallery__media-slider .flickity-viewport");
+      if (viewport instanceof HTMLElement) return viewport;
+
+      const slider = queryWithinSection(".product-gallery__media-slider");
+      if (slider instanceof HTMLElement) return slider;
+
+      const galleryMedia = queryWithinSection(".product-gallery__media");
+      if (galleryMedia instanceof HTMLElement) return galleryMedia;
+
+      return null;
+    }
+
+    function refreshCurrentMediaSpace(forceRepick = false) {
       if (!tryonOpen || isMobileTryon()) return;
 
-      const currentHasVisiblePresence = hasViewportPresence(currentMediaSpace);
-      const currentHasStrongPresence = hasViewportPresence(currentMediaSpace, 0.45);
+      const stableAnchor = getStableDesktopAnchor();
+      if (stableAnchor && hasViewportPresence(stableAnchor, 0.12)) {
+        return;
+      }
+
+      const currentHasViewportPresence = hasViewportPresence(currentMediaSpace, 0.12);
+
+      if (!forceRepick && isDesktopMediaSpaceUsable(currentMediaSpace) && currentHasViewportPresence) {
+        return;
+      }
 
       if (
+        !forceRepick &&
         Date.now() < reanchorBlockedUntil &&
-        currentHasStrongPresence
+        lastRect &&
+        hasViewportPresence(currentMediaSpace, 0.02)
       ) {
         return;
       }
 
-      if (currentHasStrongPresence) {
-        return;
-      }
+      const next =
+        pickBestMediaSpaceByOverlap() ||
+        queryWithinSection(".product-gallery__media-space");
 
-      const next = pickBestMediaSpaceByOverlap();
-      if (!next) {
-        if (!currentHasVisiblePresence) {
-          currentMediaSpace = null;
-        }
+      if (!isDesktopMediaSpaceUsable(next) || next === currentMediaSpace) {
         return;
       }
-      if (next === currentMediaSpace) return;
 
       currentMediaSpace = next;
       lastRect = null;
     }
 
     function getDesktopAnchorElement() {
-      if (!currentMediaSpace || !currentMediaSpace.isConnected) return null;
-      if (!hasViewportPresence(currentMediaSpace)) return null;
+      const stableAnchor = getStableDesktopAnchor();
+      if (stableAnchor && hasViewportPresence(stableAnchor, 0.02)) {
+        return stableAnchor;
+      }
+
+      if (!isDesktopMediaSpaceUsable(currentMediaSpace)) return null;
+      if (!hasViewportPresence(currentMediaSpace, 0.02)) return null;
       return currentMediaSpace;
     }
 
@@ -476,6 +619,7 @@
       TRYON_ROOT.style.inset = "";
       TRYON_ROOT.style.zIndex = "";
       TRYON_ROOT.style.transition = "";
+      TRYON_ROOT.style.visibility = "";
 
       document.body.classList.remove("tryon-open");
 
@@ -493,6 +637,7 @@
         clearTimeout(variantSyncTimeout);
         variantSyncTimeout = null;
       }
+      clearVariantSettlingSyncs();
 
       tryonOpen = false;
       currentMediaSpace = null;
@@ -509,11 +654,27 @@
     function syncTryonPosition() {
       if (!tryonOpen || isMobileTryon()) return;
 
+      const keepLastStableRect = () => {
+        if (!lastRect) {
+          TRYON_ROOT.style.visibility = "hidden";
+          TRYON_ROOT.style.pointerEvents = "none";
+          return;
+        }
+        TRYON_ROOT.style.visibility = "visible";
+        TRYON_ROOT.style.pointerEvents = "auto";
+      };
+
       refreshCurrentMediaSpace();
-      if (!currentMediaSpace) return;
+      if (!currentMediaSpace) {
+        keepLastStableRect();
+        return;
+      }
 
       const anchorEl = getDesktopAnchorElement();
-      if (!anchorEl) return;
+      if (!anchorEl) {
+        keepLastStableRect();
+        return;
+      }
 
       const rect = anchorEl.getBoundingClientRect();
       const nextRect = {
@@ -522,7 +683,10 @@
         width: Math.max(0, Math.round(rect.width)),
         height: Math.max(0, Math.round(rect.height)),
       };
-      if (nextRect.width < 40 || nextRect.height < 40) return;
+      if (nextRect.width < 40 || nextRect.height < 40) {
+        keepLastStableRect();
+        return;
+      }
       if (lastRect) {
         const dx = Math.abs(nextRect.left - lastRect.left);
         const dy = Math.abs(nextRect.top - lastRect.top);
@@ -544,6 +708,7 @@
       TRYON_ROOT.style.transition = "none";
       TRYON_ROOT.style.zIndex = "100";
       TRYON_ROOT.style.pointerEvents = "auto";
+      TRYON_ROOT.style.visibility = "visible";
     }
 
     function mountTryonTo(mediaSpace) {
@@ -573,6 +738,7 @@
         TRYON_ROOT.style.width = "100vw";
         TRYON_ROOT.style.height = "100dvh";
         TRYON_ROOT.style.zIndex = "9999";
+        TRYON_ROOT.style.visibility = "visible";
 
         tryonOpen = true;
         return; // skip desktop logic
@@ -593,6 +759,7 @@
       TRYON_ROOT.style.inset = "auto";
       TRYON_ROOT.style.transform = "none";
       TRYON_ROOT.style.zIndex = "100";
+      TRYON_ROOT.style.visibility = "hidden";
 
       document.body.classList.add("tryon-open");
       tryonOpen = true;
@@ -601,9 +768,9 @@
     }
 
     const gallery =
-      document.querySelector(".product-gallery") ||
-      document.querySelector(".product-gallery__media") ||
-      document.querySelector(".product-gallery__media-space")?.parentElement;
+      queryWithinSection(".product-gallery") ||
+      queryWithinSection(".product-gallery__media") ||
+      queryWithinSection(".product-gallery__media-space")?.parentElement;
 
     if (gallery) {
       const obs = new MutationObserver(() => {
@@ -640,7 +807,7 @@
       const fallbackSpace =
         currentMediaSpace ||
         pickBestMediaSpaceByOverlap() ||
-        document.querySelector(".product-gallery__media-space");
+        queryWithinSection(".product-gallery__media-space");
 
       if (nowMobile) {
         if (fallbackSpace) {
@@ -667,23 +834,23 @@
 
     function getSelectedSwatchLabel() {
       const checked =
-        document.querySelector(".swatch__input:checked") ||
-        document.querySelector('input[type="radio"][name*="Color"]:checked') ||
-        document.querySelector('input[type="radio"][name*="colour"]:checked');
+        queryWithinSection(".swatch__input:checked") ||
+        queryWithinSection('input[type="radio"][name*="Color"]:checked') ||
+        queryWithinSection('input[type="radio"][name*="colour"]:checked');
 
       if (checked && checked.id) {
-        const label = document.querySelector(`label[for="${CSS.escape(checked.id)}"]`);
+        const label = queryWithinSection(`label[for="${CSS.escape(checked.id)}"]`);
         if (label) return label;
       }
 
       return (
-        document.querySelector(".swatch__label.is-selected") ||
-        document.querySelector(".swatch__label[aria-checked='true']")
+        queryWithinSection(".swatch__label.is-selected") ||
+        queryWithinSection(".swatch__label[aria-checked='true']")
       );
     }
 
     function getVariantTitle() {
-      const select = document.querySelector('form[action="/cart/add"] select[name="id"]');
+      const select = queryWithinSection('form[action="/cart/add"] select[name="id"]');
       if (select?.selectedOptions?.length) return select.selectedOptions[0].text.trim();
 
       const label = getSelectedSwatchLabel();
@@ -699,7 +866,7 @@
       const swatchVariant = label?.dataset?.swatchVariant || null;
 
       const fromUrl = new URLSearchParams(window.location.search).get("variant");
-      const input = document.querySelector('form[action="/cart/add"] [name="id"]');
+      const input = queryWithinSection('form[action="/cart/add"] [name="id"]');
       const fromInput = input?.value || null;
 
       return swatchVariant || fromInput || fromUrl;
@@ -731,6 +898,7 @@
         variantSyncTimeout = null;
         sendVariantToIframe(force);
       }, 80);
+      scheduleVariantSettlingSyncs();
     }
 
     document.addEventListener("change", function (e) {
@@ -749,6 +917,7 @@
     document.addEventListener("click", function (e) {
       const btn = e.target.closest("[data-tryon-button]");
       if (!btn) return;
+      if (!PRODUCT_SECTION.contains(btn)) return;
 
       e.preventDefault();
       e.stopPropagation();
@@ -763,11 +932,18 @@
       const variant = decodeURIComponent(btn.dataset.variantTitle || "");
       const iframe = getIframe();
 
-      if (iframe && !iframe.getAttribute("src")) {
-        iframe.src =
-          "https://idonytryon.eu.ngrok.io/tryon" +
-          "?handle=" + encodeURIComponent(handle || "") +
-          "&variant=" + encodeURIComponent(variant || "");
+      if (iframe) {
+        const nextSrc = buildTryonIframeSrc(handle || "", variant || "");
+        const currentSrc = iframe.getAttribute("src") || "";
+        const debugParams = getTryonDebugParamsFromPage();
+        const pageHasDebug = Array.from(debugParams.keys()).length > 0;
+        const iframeHasDebug =
+          currentSrc.includes("lipdebug=") || currentSrc.includes("debug=");
+        const shouldRefreshForDebug = pageHasDebug && !iframeHasDebug;
+        const shouldForceReload = pageHasDebug || shouldForceTryonIframeReload();
+        if (!currentSrc || shouldRefreshForDebug || shouldForceReload) {
+          iframe.src = shouldForceReload ? addIframeCacheBust(nextSrc) : nextSrc;
+        }
       }
     
       mountTryonTo(currentMediaSpace);

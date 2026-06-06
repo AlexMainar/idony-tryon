@@ -63,6 +63,14 @@
         178,
         88,
         95
+      ],
+      "temples": [
+        400,
+        379,
+        365,
+        397,
+        288,
+        361
       ]
     }
   },
@@ -95,8 +103,119 @@
   "dream_paint_bronzer": {
     "display_name": "Dream Paint Bronzer - Sugar Caine",
     "color": "#b47862",
-    "opacity": 0.4,
+    "opacity": 0.48,
     "regions": {
+      "cheekbones": [
+        234,
+        93,
+        132,
+        58,
+        172,
+        136
+      ],
+      "nose_contour": [
+        5,
+        51,
+        6,
+        197
+      ],
+      "eyelids": [
+        [
+          33,
+          246,
+          161,
+          160,
+          159,
+          158,
+          157,
+          173
+        ],
+        [
+          263,
+          466,
+          388,
+          387,
+          386,
+          385,
+          384,
+          398
+        ]
+      ],
+      "lips_outer": [
+        61,
+        185,
+        40,
+        39,
+        37,
+        0,
+        267,
+        269,
+        270,
+        409,
+        291,
+        375,
+        321,
+        405,
+        314,
+        17,
+        84,
+        181,
+        91,
+        146
+      ],
+      "lips_inner": [
+        78,
+        191,
+        80,
+        81,
+        82,
+        13,
+        312,
+        311,
+        310,
+        415,
+        308,
+        324,
+        318,
+        402,
+        317,
+        14,
+        87,
+        178,
+        88,
+        95
+      ],
+      "temples": [
+        400,
+        379,
+        365,
+        397,
+        288,
+        361
+      ]
+    }
+  },
+  "dream_paint_blush_ibiza": {
+    "display_name": "Dream Paint Blush - Ibiza",
+    "color": "#ff5f70",
+    "opacity": 0.68,
+    "regions": {
+      "cheeks": [
+        234,
+        93,
+        132,
+        58,
+        172,
+        136
+      ],
+      "nose": [
+        195,
+        5,
+        55,
+        285,
+        441,
+        275
+      ],
       "cheekbones": [
         234,
         93,
@@ -140,29 +259,6 @@
         397,
         288,
         361
-      ]
-    }
-  },
-  "dream_paint_blush_ibiza": {
-    "display_name": "Dream Paint Blush - Ibiza",
-    "color": "#ff6e78",
-    "opacity": 0.55,
-    "regions": {
-      "cheeks": [
-        234,
-        93,
-        132,
-        58,
-        172,
-        136
-      ],
-      "nose": [
-        195,
-        5,
-        55,
-        285,
-        441,
-        275
       ],
       "lips_outer": [
         61,
@@ -213,7 +309,7 @@
   "dream_paint_blush_chelsea": {
     "display_name": "Dream Paint Blush - Chelsea",
     "color": "#ae4468",
-    "opacity": 0.55,
+    "opacity": 0.62,
     "regions": {
       "cheeks": [
         234,
@@ -230,6 +326,50 @@
         285,
         441,
         275
+      ],
+      "cheekbones": [
+        234,
+        93,
+        132,
+        58,
+        172,
+        136
+      ],
+      "nose_contour": [
+        5,
+        51,
+        6,
+        197
+      ],
+      "eyelids": [
+        [
+          33,
+          246,
+          161,
+          160,
+          159,
+          158,
+          157,
+          173
+        ],
+        [
+          263,
+          466,
+          388,
+          387,
+          386,
+          385,
+          384,
+          398
+        ]
+      ],
+      "temples": [
+        400,
+        379,
+        365,
+        397,
+        288,
+        361
       ],
       "lips_outer": [
         61,
@@ -432,7 +572,7 @@
   },
   "lip_grace_twilight_zone": {
     "display_name": "Lip Grace Stick - Twilight Zone",
-    "color": "#9a4957",
+    "color": "#b75a76",
     "opacity": 0.7,
     "regions": {
       "lips_outer": [
@@ -483,8 +623,8 @@
   },
   "lip_bloom_clover_club": {
     "display_name": "Lip Bloom Oil & Tint - Clover Club",
-    "color": "#d84d59",
-    "opacity": 0.76,
+    "color": "#af4b55",
+    "opacity": 0.8,
     "regions": {
       "lips_outer": [
         61,
@@ -534,8 +674,8 @@
   },
   "lip_bloom_barbados": {
     "display_name": "Lip Bloom Oil & Tint - Barbados",
-    "color": "#9a4f45",
-    "opacity": 0.74,
+    "color": "#845557",
+    "opacity": 0.82,
     "regions": {
       "lips_outer": [
         61,
@@ -585,8 +725,8 @@
   },
   "lip_bloom_ruby_vice": {
     "display_name": "Lip Bloom Oil & Tint - Ruby Vice",
-    "color": "#c41434",
-    "opacity": 0.8,
+    "color": "#d40a39",
+    "opacity": 0.84,
     "regions": {
       "lips_outer": [
         61,

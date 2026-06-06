@@ -62,6 +62,38 @@ canvas {
   pointer-events: auto !important;
 }
 
+.tryon-whisper-copy {
+  position: absolute;
+  z-index: 99990;
+  pointer-events: none;
+  top: 19%;
+  left: 50%;
+  width: min(calc(100% - 3rem), 42rem);
+  transform: translateX(-50%);
+}
+
+.tryon-whisper-copy__text {
+  margin: 0;
+  color: #f7f2ee;
+  font-family: "Sharp Grotesk", "Helvetica Neue", "Inter", sans-serif;
+  font-size: clamp(30px, 4.6vw, 36px);
+  font-weight: 300;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  text-align: center;
+  text-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.22),
+    0 0 18px rgba(0, 0, 0, 0.1);
+  opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tryon-whisper-copy {
+    top: auto;
+    bottom: 12%;
+  }
+}
+
 /* Prevent Shopify's aspect-ratio tricks from distorting the iframe content */
 #tryon-frame-container,
 #tryon-frame {
