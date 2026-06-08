@@ -75,7 +75,7 @@ canvas {
 .tryon-whisper-copy__text {
   margin: 0;
   color: #f7f2ee;
-  font-family: "Sharp Grotesk", "Helvetica Neue", "Inter", sans-serif;
+  font-family: "Intern", "Inter", "Helvetica Neue", sans-serif;
   font-size: clamp(30px, 4.6vw, 36px);
   font-weight: 300;
   line-height: 1;
@@ -91,6 +91,10 @@ canvas {
   .tryon-whisper-copy {
     top: auto;
     bottom: 12%;
+  }
+
+  .tryon-whisper-copy__text {
+    font-size: clamp(24px, 2vw, 30px);
   }
 }
 

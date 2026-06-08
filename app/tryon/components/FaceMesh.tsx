@@ -1909,7 +1909,7 @@ export default function FaceMeshComponent({
 
       <div className="tryon-whisper-copy" aria-hidden="true">
         <div className="tryon-whisper-copy__text">
-          Sonríe
+          ¡Sonríe!
         </div>
       </div>
 
