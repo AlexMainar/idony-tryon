@@ -38,6 +38,49 @@ const TEMPLE_MIRROR_MAP: Record<number, number> = {
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
+const isLikelyWebKitMaskBugBrowser = (() => {
+  let cached: boolean | null = null;
+
+  return () => {
+    if (cached != null) return cached;
+    if (typeof navigator === "undefined") return false;
+
+    const ua = navigator.userAgent || "";
+    const platform = navigator.platform || "";
+    const touchPoints =
+      typeof navigator.maxTouchPoints === "number" ? navigator.maxTouchPoints : 0;
+    const isIOS =
+      /iPad|iPhone|iPod/.test(ua) || (touchPoints > 1 && /Mac/.test(platform));
+    const isSafari =
+      /Safari\//.test(ua) &&
+      !/Chrome\/|CriOS\/|FxiOS\/|EdgiOS\/|Edg\//.test(ua);
+
+    cached = isIOS || isSafari;
+    return cached;
+  };
+})();
+
+const shouldUseSimpleMobileBlushFallback = (() => {
+  let cached: boolean | null = null;
+
+  return () => {
+    if (cached != null) return cached;
+    if (typeof navigator === "undefined" || typeof window === "undefined") return false;
+
+    const ua = navigator.userAgent || "";
+    const touchPoints =
+      typeof navigator.maxTouchPoints === "number" ? navigator.maxTouchPoints : 0;
+    const coarsePointer =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches;
+    const isIOSLike =
+      /iPad|iPhone|iPod/.test(ua) || (/Mac/.test(navigator.platform || "") && touchPoints > 1);
+
+    cached = isLikelyWebKitMaskBugBrowser() && (coarsePointer || isIOSLike);
+    return cached;
+  };
+})();
+
 const normalizeRegion = (region?: RegionDefinition | null): number[] | null => {
   if (!region) return null;
   if (Array.isArray(region[0])) return (region as number[][])[0];
@@ -436,7 +479,7 @@ const renderEllipseLayer = (
   hexToRgba: (hex: string, opacity: number) => string,
   mask?: SoftPathMask
 ) => {
-  if (mask) {
+  if (mask && !isLikelyWebKitMaskBugBrowser()) {
     const blurPad = blur + 2;
     renderWithSoftPathMask(
       ctx,
@@ -496,7 +539,7 @@ const renderGradientLayer = (
   fillBox: { x: number; y: number; width: number; height: number },
   mask?: SoftPathMask
 ) => {
-  if (mask) {
+  if (mask && !isLikelyWebKitMaskBugBrowser()) {
     const blurPad = blur + 2;
     renderWithSoftPathMask(
       ctx,
@@ -537,6 +580,51 @@ const renderCheekBlush = (
   finish: BlushFinish
 ) => {
   if (!built) return;
+
+  if (shouldUseSimpleMobileBlushFallback()) {
+    const isDreamPaint = finish === "dream_paint";
+    const fillBase = isDreamPaint
+      ? mixHexColors(productColor, "#b14e6d", 0.08)
+      : mixHexColors(productColor, "#a24162", 0.1);
+    const fillGlow = isDreamPaint
+      ? mixHexColors(productColor, "#ffd9df", 0.14)
+      : mixHexColors(productColor, "#ffe0e5", 0.12);
+
+    ctx.save();
+    ctx.globalCompositeOperation = "multiply";
+    ctx.globalAlpha = baseOpacity * (isDreamPaint ? 0.2 : 0.17);
+    ctx.fillStyle = hexToRgba(fillBase, 1);
+    ctx.fill(built.path);
+    ctx.restore();
+
+    const gradient = ctx.createLinearGradient(
+      built.centerX,
+      built.minY,
+      built.centerX,
+      built.maxY
+    );
+    gradient.addColorStop(0, hexToRgba(fillGlow, baseOpacity * (isDreamPaint ? 0.12 : 0.09)));
+    gradient.addColorStop(
+      0.45,
+      hexToRgba(productColor, baseOpacity * (isDreamPaint ? 0.08 : 0.06))
+    );
+    gradient.addColorStop(1, "transparent");
+
+    renderGradientLayer(
+      ctx,
+      built.path,
+      gradient,
+      "soft-light",
+      0,
+      {
+        x: built.minX,
+        y: built.minY,
+        width: built.areaWidth,
+        height: built.areaHeight,
+      }
+    );
+    return;
+  }
 
   const side = built.centerX < faceCenterX ? -1 : 1;
   const outerX = side < 0 ? built.minX : built.maxX;
@@ -687,6 +775,17 @@ const renderNoseTint = (
 ) => {
   if (!built) return;
 
+  if (shouldUseSimpleMobileBlushFallback()) {
+    const noseColor = mixHexColors(productColor, "#f3b6bf", 0.12);
+    ctx.save();
+    ctx.globalCompositeOperation = "soft-light";
+    ctx.globalAlpha = baseOpacity * 0.12;
+    ctx.fillStyle = hexToRgba(noseColor, 1);
+    ctx.fill(built.path);
+    ctx.restore();
+    return;
+  }
+
   const noseColor = mixHexColors(productColor, "#f4b0b8", 0.18);
   const noseGlow = mixHexColors(productColor, "#ffe5e8", 0.2);
   const noseGrad = ctx.createRadialGradient(
@@ -725,6 +824,43 @@ const renderSoftAreaBlush = (
   intensity = 1
 ) => {
   if (!built) return;
+
+  if (shouldUseSimpleMobileBlushFallback()) {
+    const areaBase = mixHexColors(productColor, "#af4b67", 0.08);
+    const areaGlow = mixHexColors(productColor, "#ffe0e5", 0.1);
+
+    ctx.save();
+    ctx.globalCompositeOperation = "multiply";
+    ctx.globalAlpha = baseOpacity * 0.1 * intensity;
+    ctx.fillStyle = hexToRgba(areaBase, 1);
+    ctx.fill(built.path);
+    ctx.restore();
+
+    const gradient = ctx.createLinearGradient(
+      built.centerX,
+      built.minY,
+      built.centerX,
+      built.maxY
+    );
+    gradient.addColorStop(0, hexToRgba(areaGlow, baseOpacity * 0.08 * intensity));
+    gradient.addColorStop(0.4, hexToRgba(productColor, baseOpacity * 0.05 * intensity));
+    gradient.addColorStop(1, "transparent");
+
+    renderGradientLayer(
+      ctx,
+      built.path,
+      gradient,
+      "soft-light",
+      0,
+      {
+        x: built.minX,
+        y: built.minY,
+        width: built.areaWidth,
+        height: built.areaHeight,
+      }
+    );
+    return;
+  }
 
   const softCoreMask: SoftPathMask = {
     bounds: built,
@@ -914,11 +1050,9 @@ export function renderBlush(
 
   if (cheekMasks.length) {
     cheekMasks.forEach((built) => {
-      const targetBuilt =
-        finish === "dream_paint" ? buildDreamPaintCheekArea(built, faceCenterX) : built;
       renderCheekBlush(
         ctx,
-        targetBuilt,
+        built,
         faceCenterX,
         productData.color,
         baseOpacity,
@@ -936,11 +1070,9 @@ export function renderBlush(
 
     cheekRegions.forEach((indices) => {
       const built = buildAreaPath(indices, landmarks, width, height);
-      const targetBuilt =
-        built && finish === "dream_paint" ? buildDreamPaintCheekArea(built, faceCenterX) : built;
       renderCheekBlush(
         ctx,
-        targetBuilt,
+        built,
         faceCenterX,
         productData.color,
         baseOpacity,
