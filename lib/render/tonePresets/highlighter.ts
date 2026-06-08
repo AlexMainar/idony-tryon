@@ -61,6 +61,31 @@ const smoothstep = (edge0: number, edge1: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
+const shouldUseSimpleMobileHighlightFallback = (() => {
+  let cached: boolean | null = null;
+
+  return () => {
+    if (cached != null) return cached;
+    if (typeof navigator === "undefined" || typeof window === "undefined") return false;
+
+    const ua = navigator.userAgent || "";
+    const platform = navigator.platform || "";
+    const touchPoints =
+      typeof navigator.maxTouchPoints === "number" ? navigator.maxTouchPoints : 0;
+    const isIOSLike =
+      /iPad|iPhone|iPod/.test(ua) || (/Mac/.test(platform) && touchPoints > 1);
+    const isSafariLike =
+      /Safari\//.test(ua) &&
+      !/Chrome\/|CriOS\/|FxiOS\/|EdgiOS\/|Edg\//.test(ua);
+    const coarsePointer =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches;
+
+    cached = (isIOSLike || isSafariLike) && coarsePointer;
+    return cached;
+  };
+})();
+
 const parseHexColor = (hex: string) => {
   const clean = hex.replace("#", "");
   const normalized =
@@ -387,6 +412,59 @@ function drawEtherealCheekboneDiagnostic(
       height
     );
     if (!band) return;
+
+    if (shouldUseSimpleMobileHighlightFallback()) {
+      const path = new Path2D();
+      let minX = Number.POSITIVE_INFINITY;
+      let minY = Number.POSITIVE_INFINITY;
+      let maxX = Number.NEGATIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
+
+      band.polygon.forEach((point, index) => {
+        minX = Math.min(minX, point.x);
+        minY = Math.min(minY, point.y);
+        maxX = Math.max(maxX, point.x);
+        maxY = Math.max(maxY, point.y);
+        if (index === 0) path.moveTo(point.x, point.y);
+        else path.lineTo(point.x, point.y);
+      });
+      path.closePath();
+
+      const areaWidth = Math.max(1, maxX - minX);
+      const areaHeight = Math.max(1, maxY - minY);
+      const centerX = (minX + maxX) / 2;
+      const centerY = (minY + maxY) / 2;
+      const pearlCore = mixHexColors(productColor, "#f5dcc8", 0.18);
+      const pearlSoft = mixHexColors(productColor, "#ecd0b7", 0.14);
+
+      ctx.save();
+      ctx.globalCompositeOperation = "soft-light";
+      ctx.globalAlpha = baseOpacity * 0.12;
+      ctx.fillStyle = hexToRgba(pearlSoft, 1);
+      ctx.fill(path);
+      ctx.restore();
+
+      const gradient = ctx.createLinearGradient(minX, centerY, maxX, centerY);
+      gradient.addColorStop(0, "transparent");
+      gradient.addColorStop(0.28, hexToRgba(pearlSoft, baseOpacity * 0.08));
+      gradient.addColorStop(0.5, hexToRgba(pearlCore, baseOpacity * 0.14));
+      gradient.addColorStop(0.72, hexToRgba(pearlSoft, baseOpacity * 0.08));
+      gradient.addColorStop(1, "transparent");
+
+      ctx.save();
+      ctx.clip(path);
+      ctx.globalCompositeOperation = "screen";
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = gradient;
+      ctx.fillRect(
+        minX - areaWidth * 0.15,
+        minY - areaHeight * 0.25,
+        areaWidth * 1.3,
+        areaHeight * 1.5
+      );
+      ctx.restore();
+      return;
+    }
 
     const drawTriangleLayer = ({
       targetLine,

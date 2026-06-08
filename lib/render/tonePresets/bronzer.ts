@@ -72,6 +72,30 @@ const mixPoint = (a: Point, b: Point, t: number): Point => ({
   x: lerp(a.x, b.x, t),
   y: lerp(a.y, b.y, t),
 });
+const shouldUseSimpleMobileBronzerFallback = (() => {
+  let cached: boolean | null = null;
+
+  return () => {
+    if (cached != null) return cached;
+    if (typeof navigator === "undefined" || typeof window === "undefined") return false;
+
+    const ua = navigator.userAgent || "";
+    const platform = navigator.platform || "";
+    const touchPoints =
+      typeof navigator.maxTouchPoints === "number" ? navigator.maxTouchPoints : 0;
+    const isIOSLike =
+      /iPad|iPhone|iPod/.test(ua) || (/Mac/.test(platform) && touchPoints > 1);
+    const isSafariLike =
+      /Safari\//.test(ua) &&
+      !/Chrome\/|CriOS\/|FxiOS\/|EdgiOS\/|Edg\//.test(ua);
+    const coarsePointer =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches;
+
+    cached = (isIOSLike || isSafariLike) && coarsePointer;
+    return cached;
+  };
+})();
 const landmarkToCanvasPoint = (landmark: Landmark, width: number, height: number): Point => ({
   x: landmark.x * width,
   y: landmark.y * height,
@@ -686,6 +710,39 @@ const renderCheekBronzer = (
   baseOpacity: number,
   hexToRgba: (hex: string, opacity: number) => string
 ) => {
+  if (shouldUseSimpleMobileBronzerFallback()) {
+    const warmBody = mixHexColors(productColor, "#b67458", 0.18);
+    const warmLift = mixHexColors(productColor, "#f0c39f", 0.1);
+
+    ctx.save();
+    ctx.globalCompositeOperation = "multiply";
+    ctx.globalAlpha = baseOpacity * 0.16;
+    ctx.fillStyle = hexToRgba(warmBody, 1);
+    ctx.fill(built.path);
+    ctx.restore();
+
+    const gradient = ctx.createLinearGradient(built.minX, built.centerY, built.maxX, built.centerY);
+    gradient.addColorStop(0, "transparent");
+    gradient.addColorStop(0.28, hexToRgba(warmBody, baseOpacity * 0.08));
+    gradient.addColorStop(0.5, hexToRgba(warmLift, baseOpacity * 0.06));
+    gradient.addColorStop(0.72, hexToRgba(warmBody, baseOpacity * 0.08));
+    gradient.addColorStop(1, "transparent");
+
+    ctx.save();
+    ctx.clip(built.path);
+    ctx.globalCompositeOperation = "soft-light";
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = gradient;
+    ctx.fillRect(
+      built.minX,
+      built.minY,
+      built.areaWidth,
+      built.areaHeight
+    );
+    ctx.restore();
+    return;
+  }
+
   const side = built.centerX < faceCenterX ? -1 : 1;
   const outerX = side < 0 ? built.minX : built.maxX;
   const innerX = side < 0 ? built.maxX : built.minX;
@@ -858,6 +915,17 @@ const renderTempleBronzer = (
   baseOpacity: number,
   hexToRgba: (hex: string, opacity: number) => string
 ) => {
+  if (shouldUseSimpleMobileBronzerFallback()) {
+    const warmBody = mixHexColors(productColor, "#b77c5d", 0.16);
+    ctx.save();
+    ctx.globalCompositeOperation = "multiply";
+    ctx.globalAlpha = baseOpacity * 0.12;
+    ctx.fillStyle = hexToRgba(warmBody, 1);
+    ctx.fill(built.path);
+    ctx.restore();
+    return;
+  }
+
   const side = built.centerX < faceCenterX ? -1 : 1;
   const outerX = side < 0 ? built.minX : built.maxX;
   const innerX = side < 0 ? built.maxX : built.minX;
@@ -1563,10 +1631,11 @@ export function renderBronzer(
     ].filter(Boolean) as BuiltArea[];
 
     bronzerCheekAreas.forEach((built) => {
-      const expandedBuilt = expandCheekBronzerArea(built, faceCenterX);
       renderCheekBronzer(
         ctx,
-        expandedBuilt,
+        shouldUseSimpleMobileBronzerFallback()
+          ? built
+          : expandCheekBronzerArea(built, faceCenterX),
         faceCenterX,
         bronzerColor,
         baseOpacity,
@@ -1582,7 +1651,16 @@ export function renderBronzer(
     ].filter(Boolean) as BuiltArea[];
 
     bronzerTempleAreas.forEach((built) => {
-      renderTempleBronzer(ctx, built, faceCenterX, bronzerColor, baseOpacity, hexToRgba);
+      renderTempleBronzer(
+        ctx,
+        shouldUseSimpleMobileBronzerFallback()
+          ? built
+          : expandTempleBronzerArea(built, faceCenterX),
+        faceCenterX,
+        bronzerColor,
+        baseOpacity,
+        hexToRgba
+      );
     });
   }
 
