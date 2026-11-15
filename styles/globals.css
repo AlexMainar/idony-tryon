@@ -72,6 +72,48 @@ canvas {
   transform: translateX(-50%);
 }
 
+/* Diagnostic UI must remain usable even without generated utility styles. */
+.ethereal-compare-launch,
+.ethereal-compare-panel {
+  position: fixed;
+  top: 82px;
+  left: 12px;
+  z-index: 100001;
+  box-sizing: border-box;
+  max-width: calc(100vw - 100px);
+  padding: 12px;
+  border: 1px solid #fff;
+  border-radius: 8px;
+  background: #171717;
+  color: #fff;
+  font: 14px/1.4 Arial, sans-serif;
+  pointer-events: auto;
+}
+
+.ethereal-compare-launch,
+.ethereal-compare-panel button {
+  min-height: 44px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.ethereal-compare-panel button {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid #fff;
+  border-radius: 6px;
+  background: #fff;
+  color: #111;
+  font: inherit;
+}
+
+.ethereal-compare-panel button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .tryon-whisper-copy__text {
   margin: 0;
   color: #f7f2ee;

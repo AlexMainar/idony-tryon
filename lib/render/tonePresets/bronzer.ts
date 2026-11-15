@@ -1,3 +1,9 @@
+import {
+  type DepositFieldLayer,
+  renderDepositRgbLayers,
+} from "@/lib/render/complexion/depositRgb";
+import { resolveOpticalLayer } from "@/lib/render/complexion/productOpticalProfiles";
+import { getUnifiedComplexionProduct } from "@/lib/render/complexion/unifiedComplexionProducts";
 import { ProductToneData, RegionDefinition } from "@/lib/utils";
 
 type Landmark = { x: number; y: number };
@@ -72,30 +78,6 @@ const mixPoint = (a: Point, b: Point, t: number): Point => ({
   x: lerp(a.x, b.x, t),
   y: lerp(a.y, b.y, t),
 });
-const shouldUseSimpleMobileBronzerFallback = (() => {
-  let cached: boolean | null = null;
-
-  return () => {
-    if (cached != null) return cached;
-    if (typeof navigator === "undefined" || typeof window === "undefined") return false;
-
-    const ua = navigator.userAgent || "";
-    const platform = navigator.platform || "";
-    const touchPoints =
-      typeof navigator.maxTouchPoints === "number" ? navigator.maxTouchPoints : 0;
-    const isIOSLike =
-      /iPad|iPhone|iPod/.test(ua) || (/Mac/.test(platform) && touchPoints > 1);
-    const isSafariLike =
-      /Safari\//.test(ua) &&
-      !/Chrome\/|CriOS\/|FxiOS\/|EdgiOS\/|Edg\//.test(ua);
-    const coarsePointer =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(pointer: coarse)").matches;
-
-    cached = (isIOSLike || isSafariLike) && coarsePointer;
-    return cached;
-  };
-})();
 const landmarkToCanvasPoint = (landmark: Landmark, width: number, height: number): Point => ({
   x: landmark.x * width,
   y: landmark.y * height,
@@ -130,6 +112,38 @@ const mixHexColors = (base: string, target: string, t: number) => {
   )}${toChannel(Math.round(lerp(from.b, to.b, amount)))}`;
 };
 
+const buildSmoothClosedPath = (points: Point[]) => {
+  const path = new Path2D();
+  if (!points.length) return path;
+  if (points.length < 3) {
+    points.forEach((point, index) => {
+      if (index === 0) path.moveTo(point.x, point.y);
+      else path.lineTo(point.x, point.y);
+    });
+    path.closePath();
+    return path;
+  }
+
+  const midpoint = (a: Point, b: Point) => ({
+    x: (a.x + b.x) * 0.5,
+    y: (a.y + b.y) * 0.5,
+  });
+
+  const startMid = midpoint(points[0], points[1]);
+  path.moveTo(startMid.x, startMid.y);
+
+  for (let i = 1; i < points.length; i += 1) {
+    const current = points[i];
+    const next = points[(i + 1) % points.length];
+    const mid = midpoint(current, next);
+    path.quadraticCurveTo(current.x, current.y, mid.x, mid.y);
+  }
+
+  path.quadraticCurveTo(points[0].x, points[0].y, startMid.x, startMid.y);
+  path.closePath();
+  return path;
+};
+
 const buildAreaPath = (
   indices: number[],
   landmarks: Landmark[],
@@ -137,7 +151,6 @@ const buildAreaPath = (
   height: number
 ): BuiltArea | null => {
   const points: Point[] = [];
-  const path = new Path2D();
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
@@ -158,12 +171,10 @@ const buildAreaPath = (
     maxX = Math.max(maxX, point.x);
     maxY = Math.max(maxY, point.y);
 
-    if (points.length === 1) path.moveTo(point.x, point.y);
-    else path.lineTo(point.x, point.y);
   });
 
   if (points.length < 3) return null;
-  path.closePath();
+  const path = buildSmoothClosedPath(points);
 
   return {
     path,
@@ -182,7 +193,7 @@ const buildAreaPath = (
 const buildAreaFromPoints = (points: Point[]): BuiltArea | null => {
   if (points.length < 3) return null;
 
-  const path = new Path2D();
+  const path = buildSmoothClosedPath(points);
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
@@ -198,11 +209,7 @@ const buildAreaFromPoints = (points: Point[]): BuiltArea | null => {
     maxX = Math.max(maxX, point.x);
     maxY = Math.max(maxY, point.y);
 
-    if (idx === 0) path.moveTo(point.x, point.y);
-    else path.lineTo(point.x, point.y);
   });
-
-  path.closePath();
 
   return {
     path,
@@ -435,29 +442,41 @@ const buildTempleArea = (
   );
 };
 
-const buildNoseContourAreas = (built: BuiltArea) => {
+const buildNoseContourAreas = (
+  built: BuiltArea,
+  options?: {
+    topT?: number;
+    bottomT?: number;
+    sideOffsetScale?: number;
+    stripWidthScale?: number;
+    topInsetScale?: number;
+    bottomInsetScale?: number;
+  }
+) => {
   const centerX = built.centerX;
-  const topY = built.minY - built.areaHeight * 0.9;
+  const topY = lerp(built.minY, built.maxY, options?.topT ?? -0.9);
   const midY = built.centerY;
-  const bottomY = built.maxY + built.areaHeight * 0.35;
-  const sideOffset = Math.max(built.areaWidth * 1.05, 8);
-  const stripWidth = Math.max(built.areaWidth * 0.72, 5);
+  const bottomY = lerp(built.minY, built.maxY, options?.bottomT ?? 1.35);
+  const sideOffset = Math.max(built.areaWidth * (options?.sideOffsetScale ?? 1.05), 3);
+  const stripWidth = Math.max(built.areaWidth * (options?.stripWidthScale ?? 0.72), 2.5);
+  const topInset = built.areaHeight * (options?.topInsetScale ?? 0);
+  const bottomInset = built.areaHeight * (options?.bottomInsetScale ?? 0);
 
   const left = buildAreaFromPoints([
-    { x: centerX - sideOffset - stripWidth * 0.55, y: topY },
-    { x: centerX - sideOffset + stripWidth * 0.05, y: topY + built.areaHeight * 0.32 },
-    { x: centerX - sideOffset + stripWidth * 0.18, y: midY - built.areaHeight * 0.14 },
-    { x: centerX - sideOffset - stripWidth * 0.02, y: bottomY },
-    { x: centerX - sideOffset - stripWidth * 0.52, y: bottomY + built.areaHeight * 0.18 },
+    { x: centerX - sideOffset - stripWidth * 0.55, y: topY + topInset },
+    { x: centerX - sideOffset + stripWidth * 0.05, y: topY + built.areaHeight * 0.22 + topInset },
+    { x: centerX - sideOffset + stripWidth * 0.14, y: midY - built.areaHeight * 0.08 },
+    { x: centerX - sideOffset - stripWidth * 0.02, y: bottomY - bottomInset },
+    { x: centerX - sideOffset - stripWidth * 0.46, y: bottomY + built.areaHeight * 0.08 - bottomInset },
     { x: centerX - sideOffset - stripWidth * 0.86, y: midY + built.areaHeight * 0.08 },
   ]);
 
   const right = buildAreaFromPoints([
-    { x: centerX + sideOffset + stripWidth * 0.55, y: topY },
-    { x: centerX + sideOffset - stripWidth * 0.05, y: topY + built.areaHeight * 0.32 },
-    { x: centerX + sideOffset - stripWidth * 0.18, y: midY - built.areaHeight * 0.14 },
-    { x: centerX + sideOffset + stripWidth * 0.02, y: bottomY },
-    { x: centerX + sideOffset + stripWidth * 0.52, y: bottomY + built.areaHeight * 0.18 },
+    { x: centerX + sideOffset + stripWidth * 0.55, y: topY + topInset },
+    { x: centerX + sideOffset - stripWidth * 0.05, y: topY + built.areaHeight * 0.22 + topInset },
+    { x: centerX + sideOffset - stripWidth * 0.14, y: midY - built.areaHeight * 0.08 },
+    { x: centerX + sideOffset + stripWidth * 0.02, y: bottomY - bottomInset },
+    { x: centerX + sideOffset + stripWidth * 0.46, y: bottomY + built.areaHeight * 0.08 - bottomInset },
     { x: centerX + sideOffset + stripWidth * 0.86, y: midY + built.areaHeight * 0.08 },
   ]);
 
@@ -702,6 +721,525 @@ const buildRegionVariants = (name: string, region: RegionDefinition): number[][]
   return mirrored ? [...polygons, mirrored] : polygons;
 };
 
+const buildCombinedPath = (outerPath: Path2D, innerPath?: Path2D | null) => {
+  const combined = new Path2D();
+  combined.addPath(outerPath);
+  if (innerPath) combined.addPath(innerPath);
+  return combined;
+};
+
+const getBronzerOpacityScale = (baseOpacity: number) =>
+  Math.max(0.72, Math.min(1.2, baseOpacity / 0.73));
+
+const renderSoftDepositBronzerArea = (
+  ctx: CanvasRenderingContext2D,
+  built: BuiltArea,
+  productColor: string,
+  strength: number,
+  options?: {
+    rotation?: number;
+    centerX?: number;
+    centerY?: number;
+    radiusX?: number;
+    radiusY?: number;
+    lowerRadiusY?: number;
+    coreStrength?: number;
+    coreRadiusX?: number;
+    coreRadiusY?: number;
+    clipToPath?: boolean;
+    fillRule?: CanvasFillRule;
+    responseFloor?: number;
+    coreResponseFloor?: number;
+    responseInfluence?: number;
+    coreResponseInfluence?: number;
+  }
+) => {
+  const rotation = options?.rotation ?? 0;
+  const centerX = options?.centerX ?? built.centerX;
+  const centerY = options?.centerY ?? built.centerY;
+  const radiusX = options?.radiusX ?? built.areaWidth * 0.78;
+  const radiusY = options?.radiusY ?? built.areaHeight * 0.62;
+  const lowerRadiusY = options?.lowerRadiusY ?? radiusY;
+  const coreRadiusX = options?.coreRadiusX ?? radiusX * 0.52;
+  const coreRadiusY = options?.coreRadiusY ?? radiusY * 0.5;
+  const layers: DepositFieldLayer[] = [
+    {
+      centerX,
+      centerY,
+      radiusX,
+      radiusY,
+      lowerRadiusY,
+      rotation,
+      strength,
+      radiusScale: 2,
+      path: built.path,
+      clipToPath: options?.clipToPath ?? false,
+      fillRule: options?.fillRule,
+      responseFloor: options?.responseFloor,
+      responseInfluence: options?.responseInfluence,
+    },
+  ];
+
+  if ((options?.coreStrength ?? 0) > 0) {
+    layers.push({
+      centerX,
+      centerY,
+      radiusX: coreRadiusX,
+      radiusY: coreRadiusY,
+      lowerRadiusY: coreRadiusY * 1.08,
+      rotation,
+      strength: options?.coreStrength ?? 0,
+      radiusScale: 2,
+      path: built.path,
+      clipToPath: options?.clipToPath ?? false,
+      fillRule: options?.fillRule,
+      responseFloor: options?.coreResponseFloor ?? options?.responseFloor,
+      responseInfluence:
+        options?.coreResponseInfluence ?? options?.responseInfluence,
+    });
+  }
+
+  renderDepositRgbLayers(ctx, productColor, layers);
+};
+
+const renderCheekBronzerDeposit = (
+  ctx: CanvasRenderingContext2D,
+  built: BuiltArea,
+  faceCenterX: number,
+  productData: ProductToneData,
+  baseOpacity: number
+) => {
+  const side = built.centerX < faceCenterX ? -1 : 1;
+  const outerX = side < 0 ? built.minX : built.maxX;
+  const innerX = side < 0 ? built.maxX : built.minX;
+  const rotation = side < 0 ? 0.58 : -0.58;
+  const opacityScale = getBronzerOpacityScale(baseOpacity);
+  const productColor = productData.color;
+  const veilLayer = resolveOpticalLayer(productData, "cheek", "veil", {
+    color: mixHexColors(productColor, "#d6a98a", 0.16),
+    strength: 0.18,
+    responseFloor: 0.34,
+    responseInfluence: 0.28,
+  });
+  const bodyLayer = resolveOpticalLayer(productData, "cheek", "body", {
+    color: mixHexColors(productColor, "#bb8364", 0.08),
+    strength: 0.28,
+    responseFloor: 0.48,
+    responseInfluence: 0.2,
+  });
+  const contourLayer = resolveOpticalLayer(productData, "cheek", "contour", {
+    color: mixHexColors(productColor, "#7a5545", 0.26),
+    strength: 0.2,
+    responseFloor: 0.6,
+    responseInfluence: 0.14,
+  });
+
+  renderDepositRgbLayers(
+    ctx,
+    veilLayer.color,
+    [
+      {
+        centerX: lerp(innerX, outerX, 0.54),
+        centerY: lerp(built.minY, built.maxY, 0.48),
+        radiusX: built.areaWidth * 0.76,
+        radiusY: built.areaHeight * 0.42,
+        lowerRadiusY: built.areaHeight * 0.54,
+        rotation,
+        strength: veilLayer.strength * opacityScale,
+        radiusScale: 1.45,
+        responseFloor: veilLayer.responseFloor,
+        responseInfluence: veilLayer.responseInfluence,
+      },
+    ]
+  );
+
+  renderDepositRgbLayers(
+    ctx,
+    bodyLayer.color,
+    [
+      {
+        centerX: lerp(innerX, outerX, 0.58),
+        centerY: lerp(built.minY, built.maxY, 0.48),
+        radiusX: built.areaWidth * 0.72,
+        radiusY: built.areaHeight * 0.4,
+        lowerRadiusY: built.areaHeight * 0.52,
+        rotation,
+        strength: bodyLayer.strength * opacityScale,
+        radiusScale: 1.5,
+        responseFloor: bodyLayer.responseFloor,
+        responseInfluence: bodyLayer.responseInfluence,
+      },
+    ]
+  );
+
+  renderDepositRgbLayers(
+    ctx,
+    contourLayer.color,
+    [
+      {
+        centerX: lerp(innerX, outerX, 0.68),
+        centerY: lerp(built.minY, built.maxY, 0.5),
+        radiusX: built.areaWidth * 0.42,
+        radiusY: built.areaHeight * 0.24,
+        lowerRadiusY: built.areaHeight * 0.3,
+        rotation,
+        strength: contourLayer.strength * opacityScale,
+        radiusScale: 1.45,
+        responseFloor: contourLayer.responseFloor,
+        responseInfluence: contourLayer.responseInfluence,
+      },
+    ]
+  );
+};
+
+const renderTempleBronzerDeposit = (
+  ctx: CanvasRenderingContext2D,
+  built: BuiltArea,
+  faceCenterX: number,
+  productData: ProductToneData,
+  baseOpacity: number
+) => {
+  const side = built.centerX < faceCenterX ? -1 : 1;
+  const outerX = side < 0 ? built.minX : built.maxX;
+  const innerX = side < 0 ? built.maxX : built.minX;
+  const rotation = side < 0 ? 0.96 : -0.96;
+  const opacityScale = getBronzerOpacityScale(baseOpacity);
+  const productColor = productData.color;
+  const bodyLayer = resolveOpticalLayer(productData, "temple", "body", {
+    color: mixHexColors(productColor, "#bf8668", 0.12),
+    strength: 0.22,
+    responseFloor: 0.42,
+    responseInfluence: 0.24,
+  });
+  const coreLayer = resolveOpticalLayer(productData, "temple", "core", {
+    color: bodyLayer.color,
+    strength: 0.08,
+    responseFloor: 0.52,
+    responseInfluence: 0.18,
+  });
+  const contourLayer = resolveOpticalLayer(productData, "temple", "contour", {
+    color: mixHexColors(productColor, "#765141", 0.24),
+    strength: 0.14,
+    responseFloor: 0.58,
+    responseInfluence: 0.14,
+  });
+
+  renderSoftDepositBronzerArea(ctx, built, bodyLayer.color, bodyLayer.strength * opacityScale, {
+    centerX: lerp(innerX, outerX, 0.62),
+    centerY: lerp(built.minY, built.maxY, 0.5),
+    radiusX: built.areaWidth * 0.84,
+    radiusY: built.areaHeight * 0.64,
+    lowerRadiusY: built.areaHeight * 0.72,
+    rotation,
+    coreStrength: coreLayer.strength * opacityScale,
+    coreRadiusX: built.areaWidth * 0.34,
+    coreRadiusY: built.areaHeight * 0.24,
+    responseFloor: bodyLayer.responseFloor,
+    coreResponseFloor: coreLayer.responseFloor,
+    responseInfluence: bodyLayer.responseInfluence,
+    coreResponseInfluence: coreLayer.responseInfluence,
+  });
+
+  renderSoftDepositBronzerArea(ctx, built, contourLayer.color, contourLayer.strength * opacityScale, {
+    centerX: lerp(innerX, outerX, 0.72),
+    centerY: lerp(built.minY, built.maxY, 0.48),
+    radiusX: built.areaWidth * 0.34,
+    radiusY: built.areaHeight * 0.24,
+    lowerRadiusY: built.areaHeight * 0.28,
+    rotation,
+    responseFloor: contourLayer.responseFloor,
+    responseInfluence: contourLayer.responseInfluence,
+  });
+};
+
+const renderNoseBronzerDeposit = (
+  ctx: CanvasRenderingContext2D,
+  built: BuiltArea,
+  productData: ProductToneData,
+  baseOpacity: number
+) => {
+  const opacityScale = getBronzerOpacityScale(baseOpacity);
+  const productColor = productData.color;
+  const contourLayer = resolveOpticalLayer(productData, "nose_contour", "contour", {
+    color: mixHexColors(productColor, "#86604d", 0.2),
+    strength: 0.075,
+    responseFloor: 0.5,
+    responseInfluence: 0.24,
+  });
+
+  const contourAreas = buildNoseContourAreas(built, {
+    topT: 0.08,
+    bottomT: 0.86,
+    sideOffsetScale: 0.52,
+    stripWidthScale: 0.34,
+    topInsetScale: 0.12,
+    bottomInsetScale: 0.08,
+  });
+
+  contourAreas.forEach((contourBuilt) => {
+    const side = contourBuilt.centerX < built.centerX ? -1 : 1;
+    const outerX = side < 0 ? contourBuilt.minX : contourBuilt.maxX;
+    const innerX = side < 0 ? contourBuilt.maxX : contourBuilt.minX;
+
+    renderSoftDepositBronzerArea(ctx, contourBuilt, contourLayer.color, contourLayer.strength * opacityScale, {
+      centerX: lerp(innerX, outerX, 0.58),
+      centerY: lerp(contourBuilt.minY, contourBuilt.maxY, 0.48),
+      radiusX: contourBuilt.areaWidth * 0.46,
+      radiusY: contourBuilt.areaHeight * 0.44,
+      lowerRadiusY: contourBuilt.areaHeight * 0.48,
+      rotation: side < 0 ? 0.08 : -0.08,
+      coreStrength: 0,
+      clipToPath: true,
+      responseFloor: contourLayer.responseFloor,
+      responseInfluence: contourLayer.responseInfluence,
+    });
+  });
+};
+
+const renderEyelidBronzerDeposit = (
+  ctx: CanvasRenderingContext2D,
+  built: BuiltArea,
+  faceCenterX: number,
+  productData: ProductToneData,
+  baseOpacity: number
+) => {
+  const targetBuilt = buildEyelidBandArea(built);
+  const side = targetBuilt.centerX < faceCenterX ? -1 : 1;
+  const outerX = side < 0 ? targetBuilt.minX : targetBuilt.maxX;
+  const innerX = side < 0 ? targetBuilt.maxX : targetBuilt.minX;
+  const opacityScale = getBronzerOpacityScale(baseOpacity);
+  const productColor = productData.color;
+  const bodyLayer = resolveOpticalLayer(productData, "eyelid", "body", {
+    color: mixHexColors(productColor, "#b98365", 0.1),
+    strength: 0.14,
+    responseFloor: 0.44,
+    responseInfluence: 0.22,
+  });
+  const coreLayer = resolveOpticalLayer(productData, "eyelid", "core", {
+    color: bodyLayer.color,
+    strength: 0.05,
+    responseFloor: 0.54,
+    responseInfluence: 0.18,
+  });
+
+  renderSoftDepositBronzerArea(ctx, targetBuilt, bodyLayer.color, bodyLayer.strength * opacityScale, {
+    centerX: lerp(innerX, outerX, 0.54),
+    centerY: lerp(targetBuilt.minY, targetBuilt.maxY, 0.46),
+    radiusX: targetBuilt.areaWidth * 0.56,
+    radiusY: targetBuilt.areaHeight * 0.28,
+    lowerRadiusY: targetBuilt.areaHeight * 0.32,
+    rotation: side < 0 ? 0.16 : -0.16,
+    coreStrength: coreLayer.strength * opacityScale,
+    coreRadiusX: targetBuilt.areaWidth * 0.24,
+    coreRadiusY: targetBuilt.areaHeight * 0.12,
+    clipToPath: true,
+    responseFloor: bodyLayer.responseFloor,
+    coreResponseFloor: coreLayer.responseFloor,
+    responseInfluence: bodyLayer.responseInfluence,
+    coreResponseInfluence: coreLayer.responseInfluence,
+  });
+};
+
+const renderLipBronzerDeposit = (
+  ctx: CanvasRenderingContext2D,
+  outerBuilt: BuiltArea,
+  innerBuilt: BuiltArea | null,
+  productData: ProductToneData,
+  baseOpacity: number
+) => {
+  const opacityScale = getBronzerOpacityScale(baseOpacity);
+  const combined = buildCombinedPath(outerBuilt.path, innerBuilt?.path ?? null);
+  const productColor = productData.color;
+  const bodyLayer = resolveOpticalLayer(productData, "lip", "body", {
+    color: mixHexColors(productColor, "#ad775c", 0.1),
+    strength: 0.22,
+    responseFloor: 0.46,
+    responseInfluence: 0.2,
+  });
+  const contourLayer = resolveOpticalLayer(productData, "lip", "contour", {
+    color: mixHexColors(productColor, "#785141", 0.2),
+    strength: 0.1,
+    responseFloor: 0.58,
+    responseInfluence: 0.14,
+  });
+
+  renderDepositRgbLayers(
+    ctx,
+    bodyLayer.color,
+    [
+      {
+        centerX: outerBuilt.centerX,
+        centerY: lerp(outerBuilt.minY, outerBuilt.maxY, 0.58),
+        radiusX: outerBuilt.areaWidth * 0.34,
+        radiusY: outerBuilt.areaHeight * 0.24,
+        lowerRadiusY: outerBuilt.areaHeight * 0.28,
+        strength: bodyLayer.strength * opacityScale,
+        radiusScale: 1.5,
+        path: combined,
+        clipToPath: true,
+        fillRule: "evenodd",
+        responseFloor: bodyLayer.responseFloor,
+        responseInfluence: bodyLayer.responseInfluence,
+      },
+    ]
+  );
+
+  renderDepositRgbLayers(
+    ctx,
+    contourLayer.color,
+    [
+      {
+        centerX: outerBuilt.centerX,
+        centerY: lerp(outerBuilt.minY, outerBuilt.maxY, 0.42),
+        radiusX: outerBuilt.areaWidth * 0.22,
+        radiusY: outerBuilt.areaHeight * 0.14,
+        lowerRadiusY: outerBuilt.areaHeight * 0.18,
+        strength: contourLayer.strength * opacityScale,
+        radiusScale: 1.5,
+        path: combined,
+        clipToPath: true,
+        fillRule: "evenodd",
+        responseFloor: contourLayer.responseFloor,
+        responseInfluence: contourLayer.responseInfluence,
+      },
+    ]
+  );
+};
+
+const renderGenericBronzerDeposit = (
+  ctx: CanvasRenderingContext2D,
+  built: BuiltArea,
+  productData: ProductToneData,
+  baseOpacity: number
+) => {
+  const opacityScale = getBronzerOpacityScale(baseOpacity);
+  const productColor = productData.color;
+  const bodyLayer = resolveOpticalLayer(productData, "generic", "body", {
+    color: mixHexColors(productColor, "#b57b5f", 0.1),
+    strength: 0.19,
+    responseFloor: 0.44,
+    responseInfluence: 0.22,
+  });
+  const coreLayer = resolveOpticalLayer(productData, "generic", "core", {
+    color: bodyLayer.color,
+    strength: 0.09,
+    responseFloor: 0.54,
+    responseInfluence: 0.18,
+  });
+
+  renderSoftDepositBronzerArea(ctx, built, bodyLayer.color, bodyLayer.strength * opacityScale, {
+    clipToPath: true,
+    coreStrength: coreLayer.strength * opacityScale,
+    coreRadiusX: built.areaWidth * 0.32,
+    coreRadiusY: built.areaHeight * 0.26,
+    responseFloor: bodyLayer.responseFloor,
+    coreResponseFloor: coreLayer.responseFloor,
+    responseInfluence: bodyLayer.responseInfluence,
+    coreResponseInfluence: coreLayer.responseInfluence,
+  });
+};
+
+const renderUnifiedBronzerDeposit = (
+  ctx: CanvasRenderingContext2D,
+  landmarks: Landmark[],
+  productData: ProductToneData,
+  width: number,
+  height: number,
+  faceCenterX: number,
+  baseOpacity: number
+) => {
+  if (productData.regions.cheekbones) {
+    const cheekboneRegions = buildRegionVariants("cheekbones", productData.regions.cheekbones);
+    const bronzerCheekAreas = cheekboneRegions.length
+      ? cheekboneRegions
+          .map((indices) => buildAreaPath(indices, landmarks, width, height))
+          .filter(Boolean) as BuiltArea[]
+      : [
+          buildBronzerSweepPath(
+            BRONZER_CHEEK_BAND.left.upper,
+            BRONZER_CHEEK_BAND.left.lower,
+            BRONZER_CHEEK_BAND.left.outerBridge,
+            landmarks,
+            width,
+            height,
+            faceCenterX
+          ),
+          buildBronzerSweepPath(
+            BRONZER_CHEEK_BAND.right.upper,
+            BRONZER_CHEEK_BAND.right.lower,
+            BRONZER_CHEEK_BAND.right.outerBridge,
+            landmarks,
+            width,
+            height,
+            faceCenterX
+          ),
+        ].filter(Boolean) as BuiltArea[];
+
+    bronzerCheekAreas.forEach((built) => {
+      renderCheekBronzerDeposit(
+        ctx,
+        expandCheekBronzerArea(built, faceCenterX),
+        faceCenterX,
+        productData,
+        baseOpacity
+      );
+    });
+  }
+
+  const templeRegions = productData.regions.temples
+    ? buildRegionVariants("temples", productData.regions.temples)
+    : [];
+  const bronzerTempleAreas = templeRegions.length
+    ? templeRegions
+        .map((indices) => buildAreaPath(indices, landmarks, width, height))
+        .filter(Boolean) as BuiltArea[]
+    : [
+        buildTempleArea(BRONZER_TEMPLE_AREAS.left, landmarks, width, height, faceCenterX),
+        buildTempleArea(BRONZER_TEMPLE_AREAS.right, landmarks, width, height, faceCenterX),
+      ].filter(Boolean) as BuiltArea[];
+
+  bronzerTempleAreas.forEach((built) => {
+    renderTempleBronzerDeposit(
+      ctx,
+      expandTempleBronzerArea(built, faceCenterX),
+      faceCenterX,
+      productData,
+      baseOpacity
+    );
+  });
+
+  const lipOuter = normalizeRegionPolygons(productData.regions.lips_outer)[0];
+  const lipInner = normalizeRegionPolygons(productData.regions.lips_inner)[0];
+  const lipOuterBuilt = lipOuter ? buildAreaPath(lipOuter, landmarks, width, height) : null;
+  const lipInnerBuilt = lipInner ? buildAreaPath(lipInner, landmarks, width, height) : null;
+  if (lipOuterBuilt) {
+    renderLipBronzerDeposit(ctx, lipOuterBuilt, lipInnerBuilt, productData, baseOpacity);
+  }
+
+  Object.entries(productData.regions ?? {}).forEach(([name, region]) => {
+    if (name === "cheekbones" || name === "temples" || name === "lips_outer" || name === "lips_inner") {
+      return;
+    }
+
+    buildRegionVariants(name, region).forEach((indices) => {
+      const built = buildAreaPath(indices, landmarks, width, height);
+      if (!built) return;
+
+      if (name === "nose_contour") {
+        renderNoseBronzerDeposit(ctx, built, productData, baseOpacity);
+        return;
+      }
+
+      if (name === "eyelids") {
+        renderEyelidBronzerDeposit(ctx, built, faceCenterX, productData, baseOpacity);
+        return;
+      }
+
+      renderGenericBronzerDeposit(ctx, built, productData, baseOpacity);
+    });
+  });
+};
+
 const renderCheekBronzer = (
   ctx: CanvasRenderingContext2D,
   built: BuiltArea,
@@ -710,39 +1248,6 @@ const renderCheekBronzer = (
   baseOpacity: number,
   hexToRgba: (hex: string, opacity: number) => string
 ) => {
-  if (shouldUseSimpleMobileBronzerFallback()) {
-    const warmBody = mixHexColors(productColor, "#b67458", 0.18);
-    const warmLift = mixHexColors(productColor, "#f0c39f", 0.1);
-
-    ctx.save();
-    ctx.globalCompositeOperation = "multiply";
-    ctx.globalAlpha = baseOpacity * 0.16;
-    ctx.fillStyle = hexToRgba(warmBody, 1);
-    ctx.fill(built.path);
-    ctx.restore();
-
-    const gradient = ctx.createLinearGradient(built.minX, built.centerY, built.maxX, built.centerY);
-    gradient.addColorStop(0, "transparent");
-    gradient.addColorStop(0.28, hexToRgba(warmBody, baseOpacity * 0.08));
-    gradient.addColorStop(0.5, hexToRgba(warmLift, baseOpacity * 0.06));
-    gradient.addColorStop(0.72, hexToRgba(warmBody, baseOpacity * 0.08));
-    gradient.addColorStop(1, "transparent");
-
-    ctx.save();
-    ctx.clip(built.path);
-    ctx.globalCompositeOperation = "soft-light";
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = gradient;
-    ctx.fillRect(
-      built.minX,
-      built.minY,
-      built.areaWidth,
-      built.areaHeight
-    );
-    ctx.restore();
-    return;
-  }
-
   const side = built.centerX < faceCenterX ? -1 : 1;
   const outerX = side < 0 ? built.minX : built.maxX;
   const innerX = side < 0 ? built.maxX : built.minX;
@@ -915,17 +1420,6 @@ const renderTempleBronzer = (
   baseOpacity: number,
   hexToRgba: (hex: string, opacity: number) => string
 ) => {
-  if (shouldUseSimpleMobileBronzerFallback()) {
-    const warmBody = mixHexColors(productColor, "#b77c5d", 0.16);
-    ctx.save();
-    ctx.globalCompositeOperation = "multiply";
-    ctx.globalAlpha = baseOpacity * 0.12;
-    ctx.fillStyle = hexToRgba(warmBody, 1);
-    ctx.fill(built.path);
-    ctx.restore();
-    return;
-  }
-
   const side = built.centerX < faceCenterX ? -1 : 1;
   const outerX = side < 0 ? built.minX : built.maxX;
   const innerX = side < 0 ? built.maxX : built.minX;
@@ -1554,17 +2048,17 @@ const expandCheekBronzerArea = (built: BuiltArea, faceCenterX: number) => {
   const rotation = side < 0 ? 0.44 : -0.44;
   const cos = Math.cos(rotation);
   const sin = Math.sin(rotation);
-  const centerX = built.centerX - side * built.areaWidth * 0.16;
-  const centerY = built.centerY + built.areaHeight * 0.42;
-  const rx = built.areaWidth * 0.82;
-  const ry = built.areaHeight * 1.12;
+  const centerX = built.centerX - side * built.areaWidth * 0.2;
+  const centerY = built.centerY + built.areaHeight * 0.22;
+  const rx = built.areaWidth * 0.62;
+  const ry = built.areaHeight * 0.78;
   const points: Point[] = [];
 
   for (let i = 0; i < 32; i += 1) {
     const angle = (i / 32) * Math.PI * 2;
     const yWeight = Math.sin(angle);
-    const localX = Math.cos(angle) * rx * (yWeight > 0 ? 1.04 : 0.9);
-    const localY = yWeight * ry * (yWeight > 0 ? 1.2 : 0.82);
+    const localX = Math.cos(angle) * rx * (yWeight > 0 ? 0.92 : 0.84);
+    const localY = yWeight * ry * (yWeight > 0 ? 0.86 : 0.72);
 
     points.push({
       x: centerX + localX * cos - localY * sin,
@@ -1608,34 +2102,50 @@ export function renderBronzer(
       ? ((leftTemple.x + rightTemple.x) * width) / 2
       : width / 2;
 
+  if (getUnifiedComplexionProduct(productData) === "dream_paint_bronzer") {
+    renderUnifiedBronzerDeposit(
+      ctx,
+      landmarks,
+      productData,
+      width,
+      height,
+      faceCenterX,
+      baseOpacity
+    );
+    return;
+  }
+
   if (productData.regions.cheekbones) {
-    const bronzerCheekAreas = [
-      buildBronzerSweepPath(
-        BRONZER_CHEEK_BAND.left.upper,
-        BRONZER_CHEEK_BAND.left.lower,
-        BRONZER_CHEEK_BAND.left.outerBridge,
-        landmarks,
-        width,
-        height,
-        faceCenterX
-      ),
-      buildBronzerSweepPath(
-        BRONZER_CHEEK_BAND.right.upper,
-        BRONZER_CHEEK_BAND.right.lower,
-        BRONZER_CHEEK_BAND.right.outerBridge,
-        landmarks,
-        width,
-        height,
-        faceCenterX
-      ),
-    ].filter(Boolean) as BuiltArea[];
+    const cheekboneRegions = buildRegionVariants("cheekbones", productData.regions.cheekbones);
+    const bronzerCheekAreas = cheekboneRegions.length
+      ? cheekboneRegions
+          .map((indices) => buildAreaPath(indices, landmarks, width, height))
+          .filter(Boolean) as BuiltArea[]
+      : [
+          buildBronzerSweepPath(
+            BRONZER_CHEEK_BAND.left.upper,
+            BRONZER_CHEEK_BAND.left.lower,
+            BRONZER_CHEEK_BAND.left.outerBridge,
+            landmarks,
+            width,
+            height,
+            faceCenterX
+          ),
+          buildBronzerSweepPath(
+            BRONZER_CHEEK_BAND.right.upper,
+            BRONZER_CHEEK_BAND.right.lower,
+            BRONZER_CHEEK_BAND.right.outerBridge,
+            landmarks,
+            width,
+            height,
+            faceCenterX
+          ),
+        ].filter(Boolean) as BuiltArea[];
 
     bronzerCheekAreas.forEach((built) => {
       renderCheekBronzer(
         ctx,
-        shouldUseSimpleMobileBronzerFallback()
-          ? built
-          : expandCheekBronzerArea(built, faceCenterX),
+        expandCheekBronzerArea(built, faceCenterX),
         faceCenterX,
         bronzerColor,
         baseOpacity,
@@ -1653,9 +2163,7 @@ export function renderBronzer(
     bronzerTempleAreas.forEach((built) => {
       renderTempleBronzer(
         ctx,
-        shouldUseSimpleMobileBronzerFallback()
-          ? built
-          : expandTempleBronzerArea(built, faceCenterX),
+        expandTempleBronzerArea(built, faceCenterX),
         faceCenterX,
         bronzerColor,
         baseOpacity,

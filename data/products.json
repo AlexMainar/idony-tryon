@@ -3,14 +3,45 @@
     "display_name": "Flush & Bloom Stick - Temptation",
     "color": "#af4c76",
     "opacity": 0.6,
+    "optical_profile": {
+      "finish": "balmy_blush",
+      "display_color": "#af4c76",
+      "deposit_color": "#af4c76",
+      "areas": {
+        "cheek": {
+          "veil": {
+            "color": "#af4c76",
+            "strength": 0.28
+          },
+          "body": {
+            "color": "#af4c76",
+            "strength": 0.18
+          }
+        }
+      }
+    },
     "regions": {
       "cheeks": [
-        234,
-        93,
-        132,
-        58,
-        172,
-        136
+        [
+          116,
+          143,
+          111,
+          117,
+          118,
+          101,
+          50,
+          123
+        ],
+        [
+          345,
+          372,
+          340,
+          346,
+          347,
+          330,
+          280,
+          352
+        ]
       ],
       "nose": [
         195,
@@ -78,11 +109,74 @@
     "display_name": "Ethereal Luminizer - Stardust",
     "color": "#f2ceb8",
     "opacity": 0.46,
+    "optical_profile": {
+      "finish": "pearlescent_highlighter",
+      "display_color": "#f0c98f",
+      "deposit_color": "#f2f2f2",
+      "rendering": {
+        "highlighter": {
+          "opacity_reference": 0.55,
+          "opacity_scale_min": 0.72,
+          "opacity_scale_max": 1.25,
+          "tint_strength": 0,
+          "glow_strength": 1.0,
+          "highlight_response": 0.95,
+          "max_luma_lift": 0.08,
+          "core_max_luma_lift": 0.12,
+          "skin_integration": 0.8
+        }
+      },
+      "areas": {
+        "cheek": {
+          "veil": {
+            "color": "#f2f2f2",
+            "strength": 0.28,
+            "field": {
+              "center_x_mix": 0.56,
+              "center_y_mix": 0.42,
+              "radius_x_scale": 0.92,
+              "radius_y_scale": 0.58,
+              "lower_radius_y_scale": 0.72,
+              "radius_scale": 2,
+              "rotation": 0.54
+            }
+          },
+          "body": {
+            "color": "#f2f2f2",
+            "strength": 0.30,
+            "field": {
+              "center_x_mix": 0.58,
+              "center_y_mix": 0.48,
+              "radius_x_scale": 0.42,
+              "radius_y_scale": 0.28,
+              "lower_radius_y_scale": 0.34,
+              "radius_scale": 2,
+              "rotation": 0.54
+            }
+          },
+          "pearl": {
+            "color": "#f2f2f2",
+            "strength": 0.85
+          }
+        }
+      }
+    },
     "regions": {
       "upper_cheeks": [
-        58,
-        93,
-        132
+        [
+          127,
+          143,
+          118,
+          117,
+          116
+        ],
+        [
+          356,
+          372,
+          347,
+          346,
+          345
+        ]
       ],
       "nose_tip": [
         5,
@@ -104,14 +198,141 @@
     "display_name": "Dream Paint Bronzer - Sugar Caine",
     "color": "#b47862",
     "opacity": 0.48,
+    "optical_profile": {
+      "finish": "soft_matte_bronzer",
+      "display_color": "#b47862",
+      "deposit_color": "#b47862",
+      "light_adaptation": 0.25,
+      "chroma_strength": 0.84,
+      "luma_delta": -0.026,
+      "luma_influence": 0.72,
+      "areas": {
+        "cheek": {
+          "veil": {
+            "color": "#b57962",
+            "strength": 0.035,
+            "response_floor": 0.62,
+            "response_influence": 0.04,
+            "chroma_strength": 0.38,
+            "luma_delta": -0.006,
+            "luma_influence": 0.35
+          },
+          "body": {
+            "color": "#b57962",
+            "strength": 0.3,
+            "response_floor": 0.48,
+            "response_influence": 0.16,
+            "chroma_strength": 0.88,
+            "luma_delta": -0.028,
+            "luma_influence": 0.78
+          },
+          "contour": {
+            "color": "#a56f5a",
+            "strength": 0.2,
+            "response_floor": 0.6,
+            "response_influence": 0.14,
+            "chroma_strength": 0.92,
+            "luma_delta": -0.04,
+            "luma_influence": 0.85
+          }
+        },
+        "temple": {
+          "body": {
+            "color": "#b57a63",
+            "strength": 0.22,
+            "response_floor": 0.42,
+            "response_influence": 0.24
+          },
+          "core": {
+            "color": "#b57a63",
+            "strength": 0.08,
+            "response_floor": 0.52,
+            "response_influence": 0.18
+          },
+          "contour": {
+            "color": "#a56f5a",
+            "strength": 0.14,
+            "response_floor": 0.58,
+            "response_influence": 0.14
+          }
+        },
+        "nose_contour": {
+          "contour": {
+            "color": "#ab735e",
+            "strength": 0.075,
+            "response_floor": 0.5,
+            "response_influence": 0.24,
+            "chroma_strength": 0.62,
+            "luma_delta": -0.012,
+            "luma_influence": 0.45
+          }
+        },
+        "eyelid": {
+          "body": {
+            "color": "#b57962",
+            "strength": 0.14,
+            "response_floor": 0.44,
+            "response_influence": 0.22
+          },
+          "core": {
+            "color": "#b57962",
+            "strength": 0.05,
+            "response_floor": 0.54,
+            "response_influence": 0.18
+          }
+        },
+        "lip": {
+          "body": {
+            "color": "#b37861",
+            "strength": 0.22,
+            "response_floor": 0.46,
+            "response_influence": 0.2
+          },
+          "contour": {
+            "color": "#a8705b",
+            "strength": 0.1,
+            "response_floor": 0.58,
+            "response_influence": 0.14
+          }
+        },
+        "generic": {
+          "body": {
+            "color": "#b47862",
+            "strength": 0.19,
+            "response_floor": 0.44,
+            "response_influence": 0.22
+          },
+          "core": {
+            "color": "#b47862",
+            "strength": 0.09,
+            "response_floor": 0.54,
+            "response_influence": 0.18
+          }
+        }
+      }
+    },
     "regions": {
       "cheekbones": [
-        234,
-        93,
-        132,
-        58,
-        172,
-        136
+        [
+          116,
+          143,
+          111,
+          117,
+          118,
+          101,
+          50,
+          123
+        ],
+        [
+          345,
+          372,
+          340,
+          346,
+          347,
+          330,
+          280,
+          352
+        ]
       ],
       "nose_contour": [
         5,
@@ -199,14 +420,45 @@
     "display_name": "Dream Paint Blush - Ibiza",
     "color": "#ff5f70",
     "opacity": 0.68,
+    "optical_profile": {
+      "finish": "dream_paint_blush",
+      "display_color": "#ff5f70",
+      "deposit_color": "#ff5f70",
+      "areas": {
+        "cheek": {
+          "veil": {
+            "color": "#ff5f70",
+            "strength": 0.28
+          },
+          "body": {
+            "color": "#ff5f70",
+            "strength": 0.18
+          }
+        }
+      }
+    },
     "regions": {
       "cheeks": [
-        234,
-        93,
-        132,
-        58,
-        172,
-        136
+        [
+          116,
+          143,
+          111,
+          117,
+          118,
+          101,
+          50,
+          123
+        ],
+        [
+          345,
+          372,
+          340,
+          346,
+          347,
+          330,
+          280,
+          352
+        ]
       ],
       "nose": [
         195,
@@ -217,12 +469,26 @@
         275
       ],
       "cheekbones": [
-        234,
-        93,
-        132,
-        58,
-        172,
-        136
+        [
+          116,
+          143,
+          111,
+          117,
+          118,
+          101,
+          50,
+          123
+        ],
+        [
+          345,
+          372,
+          340,
+          346,
+          347,
+          330,
+          280,
+          352
+        ]
       ],
       "nose_contour": [
         5,
@@ -310,14 +576,45 @@
     "display_name": "Dream Paint Blush - Chelsea",
     "color": "#ae4468",
     "opacity": 0.62,
+    "optical_profile": {
+      "finish": "dream_paint_blush",
+      "display_color": "#ae4468",
+      "deposit_color": "#ae4468",
+      "areas": {
+        "cheek": {
+          "veil": {
+            "color": "#ae4468",
+            "strength": 0.28
+          },
+          "body": {
+            "color": "#ae4468",
+            "strength": 0.18
+          }
+        }
+      }
+    },
     "regions": {
       "cheeks": [
-        234,
-        93,
-        132,
-        58,
-        172,
-        136
+        [
+          116,
+          143,
+          111,
+          117,
+          118,
+          101,
+          50,
+          123
+        ],
+        [
+          345,
+          372,
+          340,
+          346,
+          347,
+          330,
+          280,
+          352
+        ]
       ],
       "nose": [
         195,
@@ -328,12 +625,26 @@
         275
       ],
       "cheekbones": [
-        234,
-        93,
-        132,
-        58,
-        172,
-        136
+        [
+          116,
+          143,
+          111,
+          117,
+          118,
+          101,
+          50,
+          123
+        ],
+        [
+          345,
+          372,
+          340,
+          346,
+          347,
+          330,
+          280,
+          352
+        ]
       ],
       "nose_contour": [
         5,

@@ -1,0 +1,913 @@
+<script>
+  (function () {
+    if (window.__IDONY_TRYON_INIT__) {
+      console.log("tryon script already initialized, skipping");
+      return;
+    }
+    window.__IDONY_TRYON_INIT__ = true;
+
+    const TRYON_ROOT = document.querySelector("#tryon-root");
+    let currentMediaSpace = null;
+    let tryonOpen = false;
+    let mutationSyncTimeout = null;
+    let variantSyncTimeout = null;
+    let variantSettlingSyncTimeouts = [];
+    let reanchorBlockedUntil = 0;
+    let lastRect = null;
+    let tryonCameraAspect = null;
+    const MOVE_EPS = 2;
+    
+    if (!TRYON_ROOT) {
+      console.log("❌ tryon-root missing");
+      return;
+    }
+    const PRODUCT_SECTION =
+      document.getElementById({{ section_id | json }}) ||
+      TRYON_ROOT.closest(".shopify-section--product") ||
+      document;
+    const queryWithinSection = (selector) => PRODUCT_SECTION.querySelector(selector);
+    const queryAllWithinSection = (selector) =>
+      Array.from(PRODUCT_SECTION.querySelectorAll(selector));
+    TRYON_ROOT.style.display = "none";
+    TRYON_ROOT.style.pointerEvents = "none";
+    TRYON_ROOT.style.overflow = "hidden";
+    TRYON_ROOT.style.background = "#000";
+
+    const getIframe = () => document.querySelector("#tryon-frame");
+    const TRYON_IFRAME_BASE = "https://shopify-preview---idony-tryon-ciiectq4ra-ew.a.run.app/tryon";
+
+    function getTryonDebugParamsFromPage() {
+      const pageParams = new URLSearchParams(window.location.search);
+      const debugParams = new URLSearchParams();
+      const rawSearch = (window.location.search || "").toLowerCase();
+
+      const lipdebug = pageParams.get("lipdebug");
+      if (lipdebug) debugParams.set("lipdebug", lipdebug);
+      const cheekdebug = pageParams.get("cheekdebug");
+      if (cheekdebug) debugParams.set("cheekdebug", cheekdebug);
+      const debug = pageParams.get("debug");
+      if (debug) debugParams.set("debug", debug);
+      const lipsource = pageParams.get("lipsource");
+      if (lipsource) debugParams.set("lipsource", lipsource);
+      const lipmode = pageParams.get("lipmode");
+      if (lipmode) debugParams.set("lipmode", lipmode);
+
+      // Tolerate malformed URLs like ?variant=123?lipdebug=1 or ?variant=123lipdebug=raw
+      if (!debugParams.has("lipdebug") && rawSearch.includes("lipdebug=1")) {
+        debugParams.set("lipdebug", "1");
+      }
+      if (!debugParams.has("lipdebug") && rawSearch.includes("lipdebug=true")) {
+        debugParams.set("lipdebug", "true");
+      }
+      if (!debugParams.has("lipdebug") && rawSearch.includes("lipdebug=raw")) {
+        debugParams.set("lipdebug", "raw");
+      }
+      if (!debugParams.has("lipdebug") && rawSearch.includes("lipdebug=image")) {
+        debugParams.set("lipdebug", "image");
+      }
+      if (!debugParams.has("cheekdebug") && rawSearch.includes("cheekdebug=outline")) {
+        debugParams.set("cheekdebug", "outline");
+      }
+      if (!debugParams.has("cheekdebug") && rawSearch.includes("cheekdebug=fill")) {
+        debugParams.set("cheekdebug", "fill");
+      }
+      if (!debugParams.has("cheekdebug") && rawSearch.includes("cheekdebug=direct")) {
+        debugParams.set("cheekdebug", "direct");
+      }
+      if (!debugParams.has("debug") && rawSearch.includes("debug=lip")) {
+        debugParams.set("debug", "lip");
+      }
+      if (!debugParams.has("debug") && rawSearch.includes("debug=lipraw")) {
+        debugParams.set("debug", "lipraw");
+      }
+      if (!debugParams.has("debug") && rawSearch.includes("debug=lipimage")) {
+        debugParams.set("debug", "lipimage");
+      }
+      if (!debugParams.has("lipsource") && rawSearch.includes("lipsource=image")) {
+        debugParams.set("lipsource", "image");
+      }
+      if (!debugParams.has("lipmode") && rawSearch.includes("lipmode=image")) {
+        debugParams.set("lipmode", "image");
+      }
+      if (!debugParams.has("debug") && rawSearch.includes("debug=true")) {
+        debugParams.set("debug", "true");
+      }
+
+      return debugParams;
+    }
+
+    function buildTryonIframeSrc(handle, variantTitle) {
+      const params = new URLSearchParams();
+      params.set("handle", handle || "");
+      params.set("variant", variantTitle || "");
+      const debugParams = getTryonDebugParamsFromPage();
+      debugParams.forEach((value, key) => params.set(key, value));
+      return `${TRYON_IFRAME_BASE}?${params.toString()}`;
+    }
+
+    function addIframeCacheBust(src) {
+      try {
+        const url = new URL(src, window.location.origin);
+        url.searchParams.set("_ts", String(Date.now()));
+        return url.toString();
+      } catch (_) {
+        return `${src}${src.includes("?") ? "&" : "?"}_ts=${Date.now()}`;
+      }
+    }
+
+    function shouldForceTryonIframeReload() {
+      return (
+        TRYON_IFRAME_BASE.includes("ngrok") ||
+        TRYON_IFRAME_BASE.includes("localhost") ||
+        TRYON_IFRAME_BASE.includes("127.0.0.1")
+      );
+    }
+
+    const tryonButtonTemplate = (() => {
+      const btn = queryWithinSection("[data-tryon-button]");
+      return btn instanceof HTMLButtonElement ? btn.cloneNode(true) : null;
+    })();
+    let lastViewportIsMobile = false;
+
+    {%- comment -%} MOBILE RESPONSIVE {%- endcomment -%}
+    const MOBILE_BP = 768;
+    let mobileShadeBar = null;
+    const MOBILE_SHADE_COLORS = {
+      "ruby vice": "#d40a39",
+      "clover club": "#af4b55",
+      barbados: "#845557",
+      temptation: "#af4c76",
+      stardust: "#f0c3aa",
+      ibiza: "#ff5f70",
+      chelsea: "#ae4468",
+      "sugar cane": "#b47862",
+      "mistique girl": "#bf1220",
+      kalahari: "#c25057",
+      "twilight zone": "#b75a76",
+      "peach cosmo": "#ae645b",
+    };
+
+    function isMobileTryon() {
+      return window.matchMedia(`(max-width: ${MOBILE_BP}px)`).matches;
+    }
+    lastViewportIsMobile = isMobileTryon();
+
+    function normalizeShadeName(value) {
+      return (value || "")
+        .toLowerCase()
+        .replace(/[_-]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function extractShadeName(label) {
+      const raw =
+        label?.dataset?.swatch?.trim() ||
+        label?.dataset?.variantTitle?.trim() ||
+        label?.textContent?.trim() ||
+        "Shade";
+
+      if (raw.includes(" - ")) {
+        const parts = raw.split(" - ").map((part) => part.trim()).filter(Boolean);
+        return parts[parts.length - 1] || raw;
+      }
+
+      return raw;
+    }
+
+    function resolveShadeColor(label) {
+      const shadeName = extractShadeName(label);
+      const mapped = MOBILE_SHADE_COLORS[normalizeShadeName(shadeName)];
+      if (mapped) return mapped;
+
+      const computed = window.getComputedStyle(label);
+      const swatchVar = computed.getPropertyValue("--swatch").trim();
+      if (swatchVar && !swatchVar.startsWith("var(")) {
+        return swatchVar;
+      }
+
+      const backgroundColor = computed.backgroundColor;
+      if (
+        backgroundColor &&
+        backgroundColor !== "rgba(0, 0, 0, 0)" &&
+        backgroundColor !== "transparent"
+      ) {
+        return backgroundColor;
+      }
+
+      return "#d9c7bf";
+    }
+
+    function getColorSwatchLabels() {
+      const form = queryWithinSection('form[action="/cart/add"]') || PRODUCT_SECTION;
+      const radios = Array.from(form.querySelectorAll('input[type="radio"][id]'));
+      return radios
+        .map((input) => queryWithinSection(`label[for="${CSS.escape(input.id)}"]`))
+        .filter((label) =>
+          label &&
+          (label.classList.contains("swatch__label") ||
+            label.dataset?.swatchVariant ||
+            label.dataset?.swatch ||
+            label.dataset?.variantTitle)
+        );
+    }
+
+    function removeMobileShadeBar() {
+      if (mobileShadeBar && mobileShadeBar.parentNode) {
+        mobileShadeBar.parentNode.removeChild(mobileShadeBar);
+      }
+      mobileShadeBar = null;
+    }
+
+    function buildMobileShadeBar() {
+      removeMobileShadeBar();
+
+      const labels = getColorSwatchLabels();
+      if (!labels.length) return;
+
+      mobileShadeBar = document.createElement("div");
+      mobileShadeBar.id = "tryon-mobile-shades";
+      const track = document.createElement("div");
+      track.className = "tryon-mobile-shades__track";
+
+      labels.forEach((label) => {
+        const forId = label.getAttribute("for");
+        const input = forId ? document.getElementById(forId) : null;
+        if (!(input instanceof HTMLInputElement)) return;
+
+        const shadeName = extractShadeName(label);
+        const variantTitle =
+          label.dataset?.variantTitle?.trim() ||
+          label.dataset?.swatch?.trim() ||
+          label.textContent?.trim() ||
+          shadeName;
+        const shadeColor = resolveShadeColor(label);
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "tryon-mobile-shade";
+        btn.dataset.for = forId || "";
+        btn.setAttribute("aria-label", variantTitle);
+
+        const swatch = document.createElement("span");
+        swatch.className = "tryon-mobile-shade__swatch";
+        swatch.style.setProperty("--tryon-shade-color", shadeColor);
+
+        const text = document.createElement("span");
+        text.className = "tryon-mobile-shade__label";
+        text.textContent = shadeName.toUpperCase();
+
+        btn.appendChild(swatch);
+        btn.appendChild(text);
+
+        btn.addEventListener("click", () => {
+          label.click();
+          queueVariantSync(true);
+          syncMobileShadeBar();
+        });
+
+        track.appendChild(btn);
+      });
+
+      mobileShadeBar.appendChild(track);
+      document.body.appendChild(mobileShadeBar);
+      syncMobileShadeBar();
+    }
+
+    function syncMobileShadeBar() {
+      if (!mobileShadeBar) return;
+      const buttons = mobileShadeBar.querySelectorAll(".tryon-mobile-shade");
+      buttons.forEach((btn) => {
+        const forId = btn.getAttribute("data-for");
+        const input = forId ? document.getElementById(forId) : null;
+        const selected = input instanceof HTMLInputElement && input.checked;
+        btn.classList.toggle("is-selected", !!selected);
+      });
+    }
+    {%- comment -%} END MOBILE RESPONSIVE {%- endcomment -%}
+
+    function pickBestMediaSpaceByOverlap() {
+      const activeSpaces = [
+        ...PRODUCT_SECTION.querySelectorAll(
+          ".product-gallery__media-slide:not(.media--hidden) .product-gallery__media-space"
+        ),
+      ];
+      const spaces = activeSpaces.length
+        ? activeSpaces
+        : [...PRODUCT_SECTION.querySelectorAll(".product-gallery__media-space")];
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      let best = null;
+      let bestScore = Number.NEGATIVE_INFINITY;
+      let fallback = null;
+      let fallbackOverlap = 0;
+      const viewportCenterX = vw / 2;
+      const viewportCenterY = vh / 2;
+
+      for (const el of spaces) {
+        const r = el.getBoundingClientRect();
+        const ow = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0));
+        const oh = Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+        const overlap = ow * oh;
+        if (overlap <= 0) continue;
+
+        if (overlap > fallbackOverlap) {
+          fallbackOverlap = overlap;
+          fallback = el;
+        }
+
+        const centerX = r.left + r.width / 2;
+        const centerY = r.top + r.height / 2;
+        const distance = Math.hypot(centerX - viewportCenterX, centerY - viewportCenterY);
+        const visibleRatio = overlap / Math.max(1, r.width * r.height);
+        if (visibleRatio < 0.25) continue;
+
+        const score = visibleRatio * 1_000_000 - distance;
+        if (score > bestScore) {
+          bestScore = score;
+          best = el;
+        }
+      }
+
+      return best || fallback;
+    }
+
+    function getViewportOverlapArea(el) {
+      if (!el || !el.isConnected) return 0;
+      const r = el.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const ow = Math.max(0, Math.min(r.right, vw) - Math.max(r.left, 0));
+      const oh = Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+      return ow * oh;
+    }
+
+    function getViewportOverlapRatio(el) {
+      if (!el || !el.isConnected) return 0;
+      const r = el.getBoundingClientRect();
+      const total = Math.max(1, r.width * r.height);
+      return getViewportOverlapArea(el) / total;
+    }
+
+    function hasViewportPresence(el, minRatio = 0) {
+      return (
+        !!el &&
+        el.isConnected &&
+        getViewportOverlapArea(el) > 0 &&
+        getViewportOverlapRatio(el) > minRatio
+      );
+    }
+
+    function clearVariantSettlingSyncs() {
+      variantSettlingSyncTimeouts.forEach((timeoutId) => {
+        clearTimeout(timeoutId);
+      });
+      variantSettlingSyncTimeouts = [];
+    }
+
+    function scheduleVariantSettlingSyncs() {
+      clearVariantSettlingSyncs();
+      if (!tryonOpen || isMobileTryon()) return;
+
+      [120, 260, 460, 760].forEach((delay) => {
+        const timeoutId = window.setTimeout(() => {
+          variantSettlingSyncTimeouts = variantSettlingSyncTimeouts.filter(
+            (id) => id !== timeoutId
+          );
+          if (!tryonOpen || isMobileTryon()) return;
+          refreshCurrentMediaSpace(delay >= 460);
+          requestAnimationFrame(syncTryonPosition);
+        }, delay);
+        variantSettlingSyncTimeouts.push(timeoutId);
+      });
+    }
+
+    function restoreTryonButtons() {
+      const activeMediaSpace = pickBestMediaSpaceByOverlap();
+      const encodedVariantTitle = encodeURIComponent(getVariantTitle() || "");
+      const liveTemplate = queryWithinSection("[data-tryon-button]");
+      const templateButton =
+        liveTemplate instanceof HTMLButtonElement
+          ? liveTemplate
+          : tryonButtonTemplate instanceof HTMLButtonElement
+            ? tryonButtonTemplate
+            : null;
+
+      if (
+        activeMediaSpace &&
+        !activeMediaSpace.querySelector("[data-tryon-button]") &&
+        templateButton instanceof HTMLButtonElement
+      ) {
+        const overlay = document.createElement("div");
+        overlay.className = "tryon-overlay";
+        const clonedButton = templateButton.cloneNode(true);
+        if (clonedButton instanceof HTMLButtonElement) {
+          if (encodedVariantTitle) {
+            clonedButton.dataset.variantTitle = encodedVariantTitle;
+          }
+          overlay.appendChild(clonedButton);
+          activeMediaSpace.appendChild(overlay);
+        }
+      }
+
+      const overlays = queryAllWithinSection(".tryon-overlay");
+      overlays.forEach((overlay) => {
+        if (!(overlay instanceof HTMLElement)) return;
+        overlay.style.display = "block";
+        overlay.style.visibility = "visible";
+        overlay.style.opacity = "1";
+        overlay.style.pointerEvents = "auto";
+      });
+
+      const buttons = queryAllWithinSection("[data-tryon-button]");
+      buttons.forEach((button) => {
+        if (!(button instanceof HTMLButtonElement)) return;
+        if (encodedVariantTitle) {
+          button.dataset.variantTitle = encodedVariantTitle;
+        }
+        button.style.display = "flex";
+        button.style.visibility = "visible";
+        button.style.opacity = "1";
+        button.style.pointerEvents = "auto";
+      });
+    }
+
+    function isDesktopMediaSpaceUsable(el) {
+      if (!el || !el.isConnected) return false;
+      const slide = el.closest(".product-gallery__media-slide");
+      if (slide instanceof HTMLElement && slide.classList.contains("media--hidden")) {
+        return false;
+      }
+      const rect = el.getBoundingClientRect();
+      return rect.width > 40 && rect.height > 40;
+    }
+
+    function getStableDesktopAnchor() {
+      const viewport = queryWithinSection(".product-gallery__media-slider .flickity-viewport");
+      if (viewport instanceof HTMLElement) return viewport;
+
+      const slider = queryWithinSection(".product-gallery__media-slider");
+      if (slider instanceof HTMLElement) return slider;
+
+      const galleryMedia = queryWithinSection(".product-gallery__media");
+      if (galleryMedia instanceof HTMLElement) return galleryMedia;
+
+      return null;
+    }
+
+    function refreshCurrentMediaSpace(forceRepick = false) {
+      if (!tryonOpen || isMobileTryon()) return;
+
+      const stableAnchor = getStableDesktopAnchor();
+      if (stableAnchor && hasViewportPresence(stableAnchor, 0.12)) {
+        return;
+      }
+
+      const currentHasViewportPresence = hasViewportPresence(currentMediaSpace, 0.12);
+
+      if (!forceRepick && isDesktopMediaSpaceUsable(currentMediaSpace) && currentHasViewportPresence) {
+        return;
+      }
+
+      if (
+        !forceRepick &&
+        Date.now() < reanchorBlockedUntil &&
+        lastRect &&
+        hasViewportPresence(currentMediaSpace, 0.02)
+      ) {
+        return;
+      }
+
+      const next =
+        pickBestMediaSpaceByOverlap() ||
+        queryWithinSection(".product-gallery__media-space");
+
+      if (!isDesktopMediaSpaceUsable(next) || next === currentMediaSpace) {
+        return;
+      }
+
+      currentMediaSpace = next;
+      lastRect = null;
+    }
+
+    function getDesktopAnchorElement() {
+      const stableAnchor = getStableDesktopAnchor();
+      if (stableAnchor && hasViewportPresence(stableAnchor, 0.02)) {
+        return stableAnchor;
+      }
+
+      if (!isDesktopMediaSpaceUsable(currentMediaSpace)) return null;
+      if (!hasViewportPresence(currentMediaSpace, 0.02)) return null;
+      return currentMediaSpace;
+    }
+
+    function fitRectToAspect(rect, aspect) {
+      if (!aspect || !Number.isFinite(aspect) || aspect <= 0) {
+        return {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+        };
+      }
+
+      const rectAspect = rect.width / Math.max(1, rect.height);
+      let width = rect.width;
+      let height = rect.height;
+
+      if (aspect > rectAspect) {
+        height = rect.width / aspect;
+      } else {
+        width = rect.height * aspect;
+      }
+
+      return {
+        left: rect.left + (rect.width - width) / 2,
+        top: rect.top + (rect.height - height) / 2,
+        width,
+        height,
+      };
+    }
+
+
+    function closeTryon() {
+      const iframe = getIframe();
+      if (iframe?.contentWindow) {
+        iframe.contentWindow.postMessage({ type: "TRYON_STOP_CAMERA" }, "*");
+      }
+
+      TRYON_ROOT.style.display = "none";
+      TRYON_ROOT.style.pointerEvents = "none";
+      TRYON_ROOT.style.position = "";
+      TRYON_ROOT.style.left = "";
+      TRYON_ROOT.style.top = "";
+      TRYON_ROOT.style.width = "";
+      TRYON_ROOT.style.height = "";
+      TRYON_ROOT.style.transform = "";
+      TRYON_ROOT.style.inset = "";
+      TRYON_ROOT.style.zIndex = "";
+      TRYON_ROOT.style.transition = "";
+      TRYON_ROOT.style.visibility = "";
+
+      document.body.classList.remove("tryon-open");
+
+      document.body.classList.remove("tryon-mobile-open");
+      removeMobileShadeBar();
+
+      // Keep root mounted in body after first open; re-parenting can reinitialize
+      // the iframe and unintentionally restart the camera after close.
+
+      if (mutationSyncTimeout) {
+        clearTimeout(mutationSyncTimeout);
+        mutationSyncTimeout = null;
+      }
+      if (variantSyncTimeout) {
+        clearTimeout(variantSyncTimeout);
+        variantSyncTimeout = null;
+      }
+      clearVariantSettlingSyncs();
+
+      tryonOpen = false;
+      currentMediaSpace = null;
+      reanchorBlockedUntil = 0;
+      lastRect = null;
+
+      // Let gallery transitions settle, then force overlay/button visibility back.
+      requestAnimationFrame(() => {
+        restoreTryonButtons();
+        requestAnimationFrame(restoreTryonButtons);
+      });
+    }
+
+    function syncTryonPosition() {
+      if (!tryonOpen || isMobileTryon()) return;
+
+      const keepLastStableRect = () => {
+        if (!lastRect) {
+          TRYON_ROOT.style.visibility = "hidden";
+          TRYON_ROOT.style.pointerEvents = "none";
+          return;
+        }
+        TRYON_ROOT.style.visibility = "visible";
+        TRYON_ROOT.style.pointerEvents = "auto";
+      };
+
+      refreshCurrentMediaSpace();
+      if (!currentMediaSpace) {
+        keepLastStableRect();
+        return;
+      }
+
+      const anchorEl = getDesktopAnchorElement();
+      if (!anchorEl) {
+        keepLastStableRect();
+        return;
+      }
+
+      const rect = anchorEl.getBoundingClientRect();
+      const nextRect = {
+        left: Math.round(rect.left),
+        top: Math.round(rect.top),
+        width: Math.max(0, Math.round(rect.width)),
+        height: Math.max(0, Math.round(rect.height)),
+      };
+      if (nextRect.width < 40 || nextRect.height < 40) {
+        keepLastStableRect();
+        return;
+      }
+      if (lastRect) {
+        const dx = Math.abs(nextRect.left - lastRect.left);
+        const dy = Math.abs(nextRect.top - lastRect.top);
+        const dw = Math.abs(nextRect.width - lastRect.width);
+        const dh = Math.abs(nextRect.height - lastRect.height);
+        if (dx <= MOVE_EPS && dy <= MOVE_EPS && dw <= MOVE_EPS && dh <= MOVE_EPS) {
+          return;
+        }
+      }
+      lastRect = nextRect;
+
+      TRYON_ROOT.style.inset = "auto";
+      TRYON_ROOT.style.position = "fixed";
+      TRYON_ROOT.style.left = `${nextRect.left}px`;
+      TRYON_ROOT.style.top = `${nextRect.top}px`;
+      TRYON_ROOT.style.width = `${nextRect.width}px`;
+      TRYON_ROOT.style.height = `${nextRect.height}px`;
+      TRYON_ROOT.style.transform = "none";
+      TRYON_ROOT.style.transition = "none";
+      TRYON_ROOT.style.zIndex = "100";
+      TRYON_ROOT.style.pointerEvents = "auto";
+      TRYON_ROOT.style.visibility = "visible";
+    }
+
+    function mountTryonTo(mediaSpace) {
+      if (!mediaSpace || !TRYON_ROOT) return;
+
+      if (isMobileTryon()) {
+        document.body.classList.add("tryon-mobile-open");
+        document.body.classList.add("tryon-open");
+        TRYON_ROOT.style.top = "0";        // reset stale top
+        TRYON_ROOT.style.transform = "none"; // reset stale transform
+
+        buildMobileShadeBar();
+
+        // move root to body to avoid gallery transforms on mobile
+        if (TRYON_ROOT.parentElement !== document.body) {
+          document.body.appendChild(TRYON_ROOT);
+        }
+
+        TRYON_ROOT.style.display = "block";
+        TRYON_ROOT.style.pointerEvents = "auto";
+        TRYON_ROOT.style.position = "fixed";
+        TRYON_ROOT.style.inset = "";      // 🔥 CLEAR CSS inset
+        TRYON_ROOT.style.bottom = "";
+        TRYON_ROOT.style.right = "";
+        TRYON_ROOT.style.left = "0";
+        TRYON_ROOT.style.top = "0";
+        TRYON_ROOT.style.width = "100vw";
+        TRYON_ROOT.style.height = "100dvh";
+        TRYON_ROOT.style.zIndex = "9999";
+        TRYON_ROOT.style.visibility = "visible";
+
+        tryonOpen = true;
+        return; // skip desktop logic
+      }
+
+      document.body.classList.remove("tryon-mobile-open");
+      removeMobileShadeBar();
+      currentMediaSpace = mediaSpace || pickBestMediaSpaceByOverlap();
+
+      // IMPORTANT: desktop root must stay in body (never move between media-space clones)
+      if (TRYON_ROOT.parentElement !== document.body) {
+        document.body.appendChild(TRYON_ROOT);
+      }
+
+      TRYON_ROOT.style.display = "block";
+      TRYON_ROOT.style.pointerEvents = "auto";
+      TRYON_ROOT.style.position = "fixed";
+      TRYON_ROOT.style.inset = "auto";
+      TRYON_ROOT.style.transform = "none";
+      TRYON_ROOT.style.zIndex = "100";
+      TRYON_ROOT.style.visibility = "hidden";
+
+      document.body.classList.add("tryon-open");
+      tryonOpen = true;
+      syncTryonPosition();
+      requestAnimationFrame(syncTryonPosition);
+    }
+
+    const gallery =
+      queryWithinSection(".product-gallery") ||
+      queryWithinSection(".product-gallery__media") ||
+      queryWithinSection(".product-gallery__media-space")?.parentElement;
+
+    if (gallery) {
+      const obs = new MutationObserver(() => {
+        if (!tryonOpen || isMobileTryon()) return;
+        if (mutationSyncTimeout) {
+          clearTimeout(mutationSyncTimeout);
+        }
+        mutationSyncTimeout = window.setTimeout(() => {
+          mutationSyncTimeout = null;
+          // Re-pick only when current target is invalid; avoids slideshow chasing.
+          refreshCurrentMediaSpace();
+          requestAnimationFrame(syncTryonPosition);
+        }, 160);
+      });
+      obs.observe(gallery, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class", "style", "aria-hidden"],
+      });
+    }
+
+    const scheduleDesktopPositionSync = () => {
+      if (!tryonOpen || isMobileTryon()) return;
+      requestAnimationFrame(syncTryonPosition);
+    };
+
+    const handleViewportModeChange = () => {
+      const nowMobile = isMobileTryon();
+      if (nowMobile === lastViewportIsMobile) return;
+      lastViewportIsMobile = nowMobile;
+      if (!tryonOpen) return;
+
+      const fallbackSpace =
+        currentMediaSpace ||
+        pickBestMediaSpaceByOverlap() ||
+        queryWithinSection(".product-gallery__media-space");
+
+      if (nowMobile) {
+        if (fallbackSpace) {
+          lastRect = null;
+          mountTryonTo(fallbackSpace);
+        }
+        return;
+      }
+
+      const nextSpace = pickBestMediaSpaceByOverlap() || fallbackSpace;
+      if (!nextSpace) return;
+      lastRect = null;
+      mountTryonTo(nextSpace);
+      requestAnimationFrame(syncTryonPosition);
+    };
+
+    window.addEventListener("resize", scheduleDesktopPositionSync);
+    window.addEventListener("orientationchange", scheduleDesktopPositionSync);
+    window.addEventListener("scroll", scheduleDesktopPositionSync, { passive: true });
+    window.addEventListener("resize", handleViewportModeChange);
+    window.addEventListener("orientationchange", handleViewportModeChange);
+
+    let lastVariantId = null;
+
+    function getSelectedSwatchLabel() {
+      const checked =
+        queryWithinSection(".swatch__input:checked") ||
+        queryWithinSection('input[type="radio"][name*="Color"]:checked') ||
+        queryWithinSection('input[type="radio"][name*="colour"]:checked');
+
+      if (checked && checked.id) {
+        const label = queryWithinSection(`label[for="${CSS.escape(checked.id)}"]`);
+        if (label) return label;
+      }
+
+      return (
+        queryWithinSection(".swatch__label.is-selected") ||
+        queryWithinSection(".swatch__label[aria-checked='true']")
+      );
+    }
+
+    function getVariantTitle() {
+      const select = queryWithinSection('form[action="/cart/add"] select[name="id"]');
+      if (select?.selectedOptions?.length) return select.selectedOptions[0].text.trim();
+
+      const label = getSelectedSwatchLabel();
+      return (
+        label?.dataset?.swatch?.trim() ||
+        label?.dataset?.variantTitle?.trim() ||
+        null
+      );
+    }
+
+    function getVariantId() {
+      const label = getSelectedSwatchLabel();
+      const swatchVariant = label?.dataset?.swatchVariant || null;
+
+      const fromUrl = new URLSearchParams(window.location.search).get("variant");
+      const input = queryWithinSection('form[action="/cart/add"] [name="id"]');
+      const fromInput = input?.value || null;
+
+      return swatchVariant || fromInput || fromUrl;
+    }
+
+    function sendVariantToIframe(force = false) {
+      const newVariantId = getVariantId();
+      const newVariantTitle = getVariantTitle();
+      const iframe = getIframe();
+
+      if (!newVariantId || !iframe?.contentWindow) return;
+      if (!force && newVariantId === lastVariantId) return;
+
+      lastVariantId = newVariantId;
+      iframe.contentWindow.postMessage(
+        { type: "COLOR_CHANGED", variantId: newVariantId, variantTitle: newVariantTitle },
+        "*"
+      );
+      console.log("Color changed → sending variant:", newVariantId, newVariantTitle);
+    }
+
+    function queueVariantSync(force = false) {
+      // Freeze desktop target switching during Shopify gallery transition.
+      reanchorBlockedUntil = Date.now() + 420;
+      if (variantSyncTimeout) {
+        clearTimeout(variantSyncTimeout);
+      }
+      variantSyncTimeout = window.setTimeout(() => {
+        variantSyncTimeout = null;
+        sendVariantToIframe(force);
+      }, 80);
+      scheduleVariantSettlingSyncs();
+    }
+
+    document.addEventListener("change", function (e) {
+      if (!tryonOpen) return;
+      const t = e.target;
+      if (!(t instanceof HTMLInputElement || t instanceof HTMLSelectElement)) return;
+      if (
+        t.name === "id" ||
+        t.name.includes("Color") ||
+        t.name.includes("colour")
+      ) {
+        queueVariantSync(true);
+      }
+    }, true);
+
+    document.addEventListener("click", function (e) {
+      const btn = e.target.closest("[data-tryon-button]");
+      if (!btn) return;
+      if (!PRODUCT_SECTION.contains(btn)) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      currentMediaSpace = btn.closest(".product-gallery__media-space");
+      if (!currentMediaSpace) return;
+
+      const loading = document.querySelector("#tryon-loading");
+      if (loading) loading.classList.remove("is-hidden");
+
+      const handle = btn.dataset.productHandle;
+      const variant = decodeURIComponent(btn.dataset.variantTitle || "");
+      const iframe = getIframe();
+
+      if (iframe) {
+        const nextSrc = buildTryonIframeSrc(handle || "", variant || "");
+        const currentSrc = iframe.getAttribute("src") || "";
+        const debugParams = getTryonDebugParamsFromPage();
+        const pageHasDebug = Array.from(debugParams.keys()).length > 0;
+        const iframeHasDebug =
+          currentSrc.includes("lipdebug=") ||
+          currentSrc.includes("cheekdebug=") ||
+          currentSrc.includes("debug=") ||
+          currentSrc.includes("lipsource=") ||
+          currentSrc.includes("lipmode=");
+        const shouldRefreshForDebug = pageHasDebug && !iframeHasDebug;
+        const shouldForceReload = pageHasDebug || shouldForceTryonIframeReload();
+        if (!currentSrc || shouldRefreshForDebug || shouldForceReload) {
+          iframe.src = shouldForceReload ? addIframeCacheBust(nextSrc) : nextSrc;
+        }
+      }
+    
+      mountTryonTo(currentMediaSpace);
+
+      lastVariantId = null;
+      queueVariantSync(true);
+    });
+
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      closeTryon();
+    });
+
+    window.addEventListener("message", (event) => {
+      if (event?.data?.type === "TRYON_CAMERA_ASPECT") {
+          const aspect = Number(event?.data?.aspect);
+          if (Number.isFinite(aspect) && aspect > 0.2 && aspect < 5) {
+            tryonCameraAspect = aspect;
+            if (tryonOpen && !isMobileTryon()) {
+              lastRect = null;
+              requestAnimationFrame(syncTryonPosition);
+            }
+          }
+          return;
+        }
+      if (event?.data?.type === "TRYON_READY") {
+          const loading = document.querySelector("#tryon-loading");
+          if (loading) loading.classList.add("is-hidden");
+        }
+      if (event?.data?.type !== "TRYON_CLOSE") return;
+      closeTryon();
+    });
+  })();
+</script>

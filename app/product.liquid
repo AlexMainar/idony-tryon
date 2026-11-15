@@ -116,7 +116,7 @@
     TRYON_ROOT.style.background = "#000";
 
     const getIframe = () => document.querySelector("#tryon-frame");
-    const TRYON_IFRAME_BASE = "https://idonytryon.eu.ngrok.io/tryon";
+    const TRYON_IFRAME_BASE = "https://shopify-preview---idony-tryon-ciiectq4ra-ew.a.run.app/tryon";
 
     function getTryonDebugParamsFromPage() {
       const pageParams = new URLSearchParams(window.location.search);
@@ -125,6 +125,8 @@
 
       const lipdebug = pageParams.get("lipdebug");
       if (lipdebug) debugParams.set("lipdebug", lipdebug);
+      const cheekdebug = pageParams.get("cheekdebug");
+      if (cheekdebug) debugParams.set("cheekdebug", cheekdebug);
       const debug = pageParams.get("debug");
       if (debug) debugParams.set("debug", debug);
       const lipsource = pageParams.get("lipsource");
@@ -144,6 +146,15 @@
       }
       if (!debugParams.has("lipdebug") && rawSearch.includes("lipdebug=image")) {
         debugParams.set("lipdebug", "image");
+      }
+      if (!debugParams.has("cheekdebug") && rawSearch.includes("cheekdebug=outline")) {
+        debugParams.set("cheekdebug", "outline");
+      }
+      if (!debugParams.has("cheekdebug") && rawSearch.includes("cheekdebug=fill")) {
+        debugParams.set("cheekdebug", "fill");
+      }
+      if (!debugParams.has("cheekdebug") && rawSearch.includes("cheekdebug=direct")) {
+        debugParams.set("cheekdebug", "direct");
       }
       if (!debugParams.has("debug") && rawSearch.includes("debug=lip")) {
         debugParams.set("debug", "lip");
@@ -938,7 +949,11 @@
         const debugParams = getTryonDebugParamsFromPage();
         const pageHasDebug = Array.from(debugParams.keys()).length > 0;
         const iframeHasDebug =
-          currentSrc.includes("lipdebug=") || currentSrc.includes("debug=");
+          currentSrc.includes("lipdebug=") ||
+          currentSrc.includes("cheekdebug=") ||
+          currentSrc.includes("debug=") ||
+          currentSrc.includes("lipsource=") ||
+          currentSrc.includes("lipmode=");
         const shouldRefreshForDebug = pageHasDebug && !iframeHasDebug;
         const shouldForceReload = pageHasDebug || shouldForceTryonIframeReload();
         if (!currentSrc || shouldRefreshForDebug || shouldForceReload) {

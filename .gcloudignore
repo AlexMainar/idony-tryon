@@ -1,0 +1,10 @@
+.gcloudignore
+.git
+#!include:.gitignore
+.env*
+.claude
+checkpoints
+tsconfig.tsbuildinfo
+*.mov
+*.mp4
+*.mov.png

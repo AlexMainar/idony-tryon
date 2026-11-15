@@ -1,10 +1,174 @@
 export type RegionDefinition = number[] | number[][];
 
+export interface ProductOpticalFieldSampleDefinition {
+  t: number;
+  weight?: number;
+}
+
+export interface ProductOpticalFieldDefinition {
+  line?: "body" | "ridge";
+  samples?: ProductOpticalFieldSampleDefinition[];
+  strength_multiplier?: number;
+  radius_x_scale?: number;
+  depth_radius_x_scale?: number;
+  radius_y_scale?: number;
+  lower_radius_y_scale?: number;
+  radius_scale?: number;
+  center_x_mix?: number;
+  center_y_mix?: number;
+  rotation?: number;
+}
+
+export interface ProductOpticalGlowDefinition {
+  glow_strength?: number;
+  tint_strength?: number;
+  highlight_response?: number;
+}
+
+export interface ProductHighlighterRenderingDefinition extends ProductOpticalGlowDefinition {
+  opacity_reference?: number;
+  opacity_scale_min?: number;
+  opacity_scale_max?: number;
+  max_luma_lift?: number;
+  core_max_luma_lift?: number;
+  skin_integration?: number;
+}
+
+export interface ProductOpticalAreaRenderStyleDefinition {
+  tint_blur?: number;
+  pearl_blur?: number;
+  sheen_blur?: number;
+  sparkle_blur?: number;
+  pearl_radius_x?: number;
+  pearl_radius_y?: number;
+  shift_x?: number;
+  shift_y?: number;
+  deposit_compact_scale?: number;
+}
+
+export interface ProductEtherealAreaBandDefinition {
+  sample_points?: number[];
+  body_mix?: number;
+  ridge_mix_start?: number;
+  ridge_mix_end?: number;
+  min_depth_px?: number;
+  area_depth_scale?: number;
+  chain_depth_scale?: number;
+  upper_offset_scale?: number;
+  lower_offset_scale?: number;
+  clip_feather_scale?: number;
+}
+
+export interface ProductEtherealFallbackBandPointDefinition {
+  t: number;
+  y_offset_scale?: number;
+}
+
+export interface ProductEtherealFallbackBandDefinition {
+  inner_limit_scale?: number;
+  outer_x_mix?: number;
+  outer_y_mix?: number;
+  cheek_base_mix?: number;
+  support_cheek_mix?: number;
+  inner_mix?: number;
+  inner_y_offset_scale?: number;
+  outer_lift_scale?: number;
+  ridge_points?: ProductEtherealFallbackBandPointDefinition[];
+  min_depth_px?: number;
+  depth_face_scale?: number;
+  depth_line_scale?: number;
+  upper_offset_scale?: number;
+  lower_offset_scale?: number;
+  body_offset_scale?: number;
+}
+
+export interface ProductEtherealSideLandmarksDefinition {
+  left?: number;
+  right?: number;
+}
+
+export interface ProductEtherealCheekboneEllipseDefinition {
+  outer_eye?: ProductEtherealSideLandmarksDefinition;
+  temple_cheek?: ProductEtherealSideLandmarksDefinition;
+  inner_cheek?: ProductEtherealSideLandmarksDefinition;
+  support_cheek?: ProductEtherealSideLandmarksDefinition;
+  sample_points?: number[];
+  outer_mix?: number;
+  inner_support_mix?: number;
+  inner_mix?: number;
+  outer_shift_x_scale?: number;
+  outer_shift_y_scale?: number;
+  inner_shift_x_scale?: number;
+  inner_shift_y_scale?: number;
+  center_y_shift_scale?: number;
+  ridge_y_offset_scale?: number;
+  body_y_offset_scale?: number;
+  radius_x_scale?: number;
+  radius_y_face_scale?: number;
+  min_radius_x_px?: number;
+  min_radius_y_px?: number;
+  clip_feather_scale?: number;
+}
+
+export interface ProductEtherealRenderingDefinition {
+  base_opacity_min?: number;
+  base_opacity_max?: number;
+  cheekbone_ellipse?: ProductEtherealCheekboneEllipseDefinition;
+  area_band?: ProductEtherealAreaBandDefinition;
+  fallback_band?: ProductEtherealFallbackBandDefinition;
+}
+
+export interface ProductOpticalRenderingDefinition {
+  ethereal?: ProductEtherealRenderingDefinition;
+  highlighter?: ProductHighlighterRenderingDefinition;
+}
+
+export interface ProductOpticalLayerDefinition {
+  color?: string;
+  strength?: number;
+  response_floor?: number;
+  response_influence?: number;
+  chroma_strength?: number;
+  luma_delta?: number;
+  luma_influence?: number;
+  field?: ProductOpticalFieldDefinition;
+  glow?: ProductOpticalGlowDefinition;
+}
+
+export interface ProductOpticalAreaDefinition {
+  render_style?: ProductOpticalAreaRenderStyleDefinition;
+  veil?: ProductOpticalLayerDefinition;
+  body?: ProductOpticalLayerDefinition;
+  core?: ProductOpticalLayerDefinition;
+  contour?: ProductOpticalLayerDefinition;
+  tint?: ProductOpticalLayerDefinition;
+  pearl?: ProductOpticalLayerDefinition;
+  sheen?: ProductOpticalLayerDefinition;
+  sparkle?: ProductOpticalLayerDefinition;
+  [layer: string]:
+    | ProductOpticalLayerDefinition
+    | ProductOpticalAreaRenderStyleDefinition
+    | undefined;
+}
+
+export interface ProductOpticalProfile {
+  finish?: string;
+  display_color?: string;
+  deposit_color?: string;
+  light_adaptation?: number;
+  luma_influence?: number;
+  chroma_strength?: number;
+  luma_delta?: number;
+  rendering?: ProductOpticalRenderingDefinition;
+  areas?: Record<string, ProductOpticalAreaDefinition>;
+}
+
 export interface ProductToneDefinition {
   color: string;
   opacity: number;
   regions: Record<string, RegionDefinition>;
-   display_name?: string;
+  display_name?: string;
+  optical_profile?: ProductOpticalProfile;
 }
 
 export interface ProductToneData extends ProductToneDefinition {

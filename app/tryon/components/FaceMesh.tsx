@@ -9,7 +9,8 @@ import React, {
 import type { FaceLandmarker } from "@mediapipe/tasks-vision";
 import productsCatalog from "@/data/products.json";
 import { initFaceLandmarker } from "@/lib/face/detectLandmarks";
-import { applyTone } from "@/lib/render/applyTone";
+import { applyTone, shouldUseDirectCheekDebugRender } from "@/lib/render/applyTone";
+import { createMobileLipOilRenderer, type MobileLipOilRenderer } from "@/lib/render/mobile/applyMobileLipOilTone";
 import {
   hexToRgba,
   resolveProductToneData,
@@ -19,6 +20,9 @@ import {
 import CameraFeed from "./CameraFeed";
 import Controls from "./Controls";
 import { BeautyFilter } from "@/lib/render/effects/BeautyFilter";
+import { createEtherealExposure } from "@/lib/render/complexion/etherealExposure";
+import { createEtherealRenderer, isEtherealProduct, ETHEREAL_RENDER_REVISION, ETHEREAL_FILM_REVISION, type EtherealRenderer, type EtherealMaterial, type EtherealSurfaceState } from "@/lib/render/ethereal/renderer";
+import type { EtherealLight } from "@/lib/render/ethereal/lighting";
 
 interface FaceMeshProps {
   product: any;
@@ -43,6 +47,29 @@ type FacePose = {
 type FaceLandmarkerRunningMode = "IMAGE" | "VIDEO";
 type CanonicalPoint3D = { x: number; y: number; z: number };
 type LipCanonicalShape = Record<number, CanonicalPoint3D>;
+type FreezeCompareState = {
+  frameCanvas: HTMLCanvasElement;
+  landmarks: LipLandmark[];
+  capturedAtMs: number;
+  width: number;
+  height: number;
+};
+type EtherealFixture = {
+  kind: "ethereal_fixture_v1";
+  width: number;
+  height: number;
+  basePng: string;
+  landmarks: LipLandmark[];
+  productData?: ProductToneData;
+  createdAt: string;
+  userAgent?: string;
+  productName?: string;
+  renderState?: { exposureGain: number; lighting: EtherealLight; revision: string; material?: EtherealMaterial; surface?:EtherealSurfaceState };
+};
+type FixtureDebugState = {
+  status: "idle" | "captured" | "loaded" | "error";
+  message: string;
+};
 
 const productCatalog = productsCatalog as Record<
   string,
@@ -51,6 +78,8 @@ const productCatalog = productsCatalog as Record<
 
 const DEFAULT_CAMERA_ZOOM = 1.34;
 const ENABLE_COLOR_CHANGED_SYNC = true;
+const ETHEREAL_LIVE_MATERIAL: EtherealMaterial = "film";
+const ETHEREAL_LIVE_REVISION = ETHEREAL_LIVE_MATERIAL === "film" ? ETHEREAL_FILM_REVISION : ETHEREAL_RENDER_REVISION;
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 
@@ -68,6 +97,101 @@ function getLipDebugFlags() {
 
 function hasLipDebugFlag(flag: string) {
   return getLipDebugFlags().has(flag.toLowerCase());
+}
+
+function getNormalizedCheekDebugValue() {
+  if (typeof window === "undefined") return "";
+  return (
+    new URLSearchParams(window.location.search)
+      .get("cheekdebug")
+      ?.toLowerCase()
+      .replace(/-/g, "_")
+      .trim() || ""
+  );
+}
+
+function shouldUseEtherealFreezeCompare() {
+  return getNormalizedCheekDebugValue() === "ethereal_freeze_compare";
+}
+
+function shouldCaptureEtherealFixture() {
+  return getNormalizedCheekDebugValue() === "ethereal_fixture_capture";
+}
+
+function shouldReplayEtherealFixture() {
+  return getNormalizedCheekDebugValue() === "ethereal_fixture_replay";
+}
+
+function cloneLandmarks(landmarks: LipLandmark[]) {
+  return landmarks.map((point) => ({ ...point }));
+}
+
+function createCanvasFrameCopy(source: HTMLCanvasElement) {
+  const frameCanvas = document.createElement("canvas");
+  frameCanvas.width = source.width;
+  frameCanvas.height = source.height;
+  const frameCtx = frameCanvas.getContext("2d");
+  if (!frameCtx) return null;
+  frameCtx.drawImage(source, 0, 0);
+  return frameCanvas;
+}
+
+function isValidEtherealFixture(value: any): value is EtherealFixture {
+  return (
+    value?.kind === "ethereal_fixture_v1" &&
+    typeof value.width === "number" &&
+    typeof value.height === "number" &&
+    typeof value.basePng === "string" &&
+    Array.isArray(value.landmarks) &&
+    value.landmarks.length > 0
+  );
+}
+
+function downloadEtherealFixture(fixture: EtherealFixture) {
+  const blob = new Blob([JSON.stringify(fixture)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `ethereal-fixture-${Date.now()}.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function loadFixtureImage(dataUrl: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Failed to load fixture base PNG"));
+    image.src = dataUrl;
+  });
+}
+
+function drawFreezeCompareOverlay(
+  ctx: CanvasRenderingContext2D,
+  state: FreezeCompareState | null,
+  isUsingFrozenFrame: boolean
+) {
+  const label = isUsingFrozenFrame && state ? "FROZEN" : "CAPTURING";
+  const ageMs = state ? Math.round(performance.now() - state.capturedAtMs) : 0;
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.filter = "none";
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "rgba(0, 0, 0, 0.72)";
+  ctx.fillRect(10, 66, 330, 70);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "12px sans-serif";
+  ctx.fillText("ETHEREAL FREEZE COMPARE", 20, 86);
+  ctx.fillText(`${label} frame=${state ? `${state.width}x${state.height}` : "pending"}`, 20, 104);
+  if (state) ctx.fillText(`landmarks=${state.landmarks.length} age=${ageMs}ms`, 178, 104);
+  ctx.fillText("renderer=legacy_desktop_original", 20, 122);
+  ctx.restore();
 }
 
 function drawDebugContour(
@@ -1006,6 +1130,10 @@ export default function FaceMeshComponent({
   const landmarkerRunningModeRef = useRef<FaceLandmarkerRunningMode | null>(null);
   const sourceFrameCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const makeupBaseCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const freezeCompareRef = useRef<FreezeCompareState | null>(null);
+  const etherealRenderStateRef = useRef<EtherealFixture["renderState"]>(undefined);
+  const fixtureCaptureDoneRef = useRef(false);
+  const fixtureReplayRef = useRef<EtherealFixture | null>(null);
   const lastVideoTimeRef = useRef(-1);
   const faceAnchorRef = useRef<{ x: number; y: number } | null>(null);
   const zoomRef = useRef(DEFAULT_CAMERA_ZOOM);
@@ -1038,13 +1166,168 @@ export default function FaceMeshComponent({
     activeVariantTitle,
   } = uiState;
   const lipDebugShowContours = hasLipDebugFlag("contours");
+  const [comparePanelOpen, setComparePanelOpen] = useState(false);
+  const etherealCompareAvailable = process.env.NODE_ENV === "development" &&
+    !!productData?.display_name?.toLowerCase().includes("ethereal");
+  const etherealCompareEnabled = etherealCompareAvailable &&
+    (comparePanelOpen || getNormalizedCheekDebugValue() === "ethereal_compare");
+  const etherealFreezeCompareEnabled = shouldUseEtherealFreezeCompare() || etherealCompareEnabled;
+  const compareCaptureRequestedRef = useRef(false);
+  const compareProductEnabledRef = useRef(true);
+  const compareRawCameraRef = useRef(false);
+  const [compareRawCamera, setCompareRawCamera] = useState(false);
+  const [compareFrozen, setCompareFrozen] = useState(false);
+  const [compareCapturePending, setCompareCapturePending] = useState(false);
+  const [compareProductEnabled, setCompareProductEnabled] = useState(true);
+  const etherealFixtureCaptureEnabled = shouldCaptureEtherealFixture();
+  const etherealFixtureReplayEnabled = shouldReplayEtherealFixture();
+  const [fixtureDebugState, setFixtureDebugState] = useState<FixtureDebugState>({
+    status: "idle",
+    message: etherealFixtureReplayEnabled
+      ? "Load a Chrome fixture JSON"
+      : etherealFixtureCaptureEnabled
+      ? "Waiting for first pre-makeup frame"
+      : "",
+  });
   const patchUiState = useCallback((patch: Partial<FaceMeshUiState>) => {
     setUiState((prev) => ({ ...prev, ...patch }));
   }, []);
+  const resetFreezeCompareState = useCallback(() => {
+    freezeCompareRef.current = null;
+    etherealRenderStateRef.current = undefined;
+    compareCaptureRequestedRef.current = false;
+    setCompareFrozen(false);
+    setCompareCapturePending(false);
+  }, []);
+  const resetFixtureState = useCallback(() => {
+    fixtureCaptureDoneRef.current = false;
+    fixtureReplayRef.current = null;
+    setFixtureDebugState({
+      status: "idle",
+      message: etherealFixtureReplayEnabled
+        ? "Load a Chrome fixture JSON"
+        : etherealFixtureCaptureEnabled
+        ? "Waiting for first pre-makeup frame"
+        : "",
+    });
+  }, [etherealFixtureCaptureEnabled, etherealFixtureReplayEnabled]);
   const resetLipRuntimeState = useCallback(() => {
     stabilizedLandmarksRef.current = [];
     canonicalLipShapeRef.current = null;
     smoothedLipLocalPoseRef.current = null;
+  }, []);
+  const renderFixtureReplay = useCallback(async (fixtureOverride?: EtherealFixture) => {
+    const fixture = fixtureOverride ?? fixtureReplayRef.current;
+    const canvas = canvasRef.current;
+    const currentProductData = fixture?.productData ?? productDataRef.current;
+
+    if (!fixture || !canvas) return;
+    if (!currentProductData) {
+      setFixtureDebugState({
+        status: "loaded",
+        message: "Fixture loaded; waiting for product data",
+      });
+      return;
+    }
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    try {
+      syncCanvasResolution(canvas);
+      ensureCanvasPresentationStyles(canvas);
+
+      let makeupBaseCanvas = makeupBaseCanvasRef.current;
+      if (!makeupBaseCanvas) {
+        makeupBaseCanvas = document.createElement("canvas");
+        makeupBaseCanvasRef.current = makeupBaseCanvas;
+      }
+      if (
+        makeupBaseCanvas.width !== fixture.width ||
+        makeupBaseCanvas.height !== fixture.height
+      ) {
+        makeupBaseCanvas.width = fixture.width;
+        makeupBaseCanvas.height = fixture.height;
+      }
+
+      const makeupBaseCtx = makeupBaseCanvas.getContext("2d");
+      if (!makeupBaseCtx) return;
+
+      const image = await loadFixtureImage(fixture.basePng);
+      makeupBaseCtx.setTransform(1, 0, 0, 1, 0, 0);
+      makeupBaseCtx.globalCompositeOperation = "source-over";
+      makeupBaseCtx.globalAlpha = 1;
+      makeupBaseCtx.filter = "none";
+      makeupBaseCtx.clearRect(0, 0, fixture.width, fixture.height);
+      makeupBaseCtx.drawImage(image, 0, 0, fixture.width, fixture.height);
+
+      const fixtureOil = isLipBloomProduct(currentProductData) ? await createMobileLipOilRenderer() : undefined;
+      const fixtureEthereal = isEtherealProduct(currentProductData)
+        ? createEtherealRenderer(fixture.renderState?.material ?? "surface") : undefined;
+      try {
+        applyTone(makeupBaseCtx, cloneLandmarks(fixture.landmarks), currentProductData,
+          fixture.width, fixture.height, hexToRgba, 1, fixtureOil,
+          fixtureEthereal ? { renderer: fixtureEthereal, source: makeupBaseCanvas,
+            exposureGain: fixture.renderState?.exposureGain ?? 1,
+            lightingOverride: fixture.renderState?.lighting,
+            surfaceOverride: fixture.renderState?.surface,
+            enabled: true, frozen: false, timestampMs: performance.now() } : undefined);
+      } finally { fixtureOil?.dispose(); fixtureEthereal?.dispose(); }
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const baseScale = Math.max(
+        canvas.width / fixture.width,
+        canvas.height / fixture.height
+      );
+      const scale = baseScale * zoomRef.current;
+      let offsetX = (canvas.width - fixture.width * scale) / 2;
+      let offsetY = (canvas.height - fixture.height * scale) / 2;
+      const nose = fixture.landmarks[1];
+      if (nose) {
+        offsetX = canvas.width * 0.5 - nose.x * fixture.width * scale;
+        offsetY = canvas.height * 0.5 - nose.y * fixture.height * scale;
+        const minOffsetX = canvas.width - fixture.width * scale;
+        const minOffsetY = canvas.height - fixture.height * scale;
+        offsetX = Math.min(0, Math.max(minOffsetX, offsetX));
+        offsetY = Math.min(0, Math.max(minOffsetY, offsetY));
+      }
+
+      ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+      ctx.filter = "none";
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+      ctx.drawImage(makeupBaseCanvas, 0, 0, fixture.width, fixture.height);
+
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.filter = "none";
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = "rgba(0, 0, 0, 0.72)";
+      ctx.fillRect(10, 142, 390, 86);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "12px sans-serif";
+      ctx.fillText("ETHEREAL FIXTURE REPLAY", 20, 162);
+      ctx.fillText(`fixture=${fixture.width}x${fixture.height}`, 20, 180);
+      ctx.fillText("camera=false mediapipe=false beauty=false", 20, 198);
+      ctx.fillText(
+        `productData=${fixture.productData ? "fixture" : "active_page"}`,
+        20,
+        216
+      );
+      ctx.restore();
+
+      setFixtureDebugState({
+        status: "loaded",
+        message: "Fixture replay rendered",
+      });
+    } catch (error) {
+      setFixtureDebugState({
+        status: "error",
+        message: error instanceof Error ? error.message : "Fixture replay failed",
+      });
+    }
   }, []);
   useEffect(() => {
     // Initialize BeautyFilter once when canvas is available
@@ -1136,9 +1419,13 @@ export default function FaceMeshComponent({
   }, [product, selectedVariant, activeVariantId, activeVariantTitle, isAwaitingVariantSync, patchUiState]);
 
   useEffect(() => {
+    if (etherealFixtureReplayEnabled) return;
     if (!productData || !isStreamReady) return;
 
     let isMounted = true;
+    let lipOilRenderer: MobileLipOilRenderer | undefined;
+    let etherealRenderer: EtherealRenderer | undefined;
+    const etherealExposure = createEtherealExposure();
     let animationFrameId: number | null = null;
     let videoFrameCallbackId: number | null = null;
     // Use the same IMAGE-mode detection path that already works for lip oil.
@@ -1148,6 +1435,10 @@ export default function FaceMeshComponent({
 
     const scheduleNext = () => {
       if (!isMounted) return;
+      if (etherealCompareEnabled && freezeCompareRef.current) {
+        animationFrameId = requestAnimationFrame(() => detectFace());
+        return;
+      }
       const video = videoRef.current;
       if (video && typeof video.requestVideoFrameCallback === "function") {
         videoFrameCallbackId = video.requestVideoFrameCallback((_, metadata) => {
@@ -1196,8 +1487,13 @@ export default function FaceMeshComponent({
         return;
       }
 
-      // Opcional: evitar procesar el mismo frame dos veces
-      if (frameTimestampMs == null && video.currentTime === lastVideoTimeRef.current) {
+      // Opcional: evitar procesar el mismo frame dos veces. En freeze compare
+      // queremos repintar la misma entrada aunque el vídeo no avance.
+      if (
+        !etherealFreezeCompareEnabled &&
+        frameTimestampMs == null &&
+        video.currentTime === lastVideoTimeRef.current
+      ) {
         scheduleNext();
         return;
       }
@@ -1209,53 +1505,87 @@ export default function FaceMeshComponent({
       syncCanvasResolution(canvas);
       ensureCanvasPresentationStyles(canvas);
 
-      if (
-        sourceCanvas.width !== video.videoWidth ||
-        sourceCanvas.height !== video.videoHeight
-      ) {
-        sourceCanvas.width = video.videoWidth;
-        sourceCanvas.height = video.videoHeight;
+      const frozenState = etherealFreezeCompareEnabled
+        ? freezeCompareRef.current
+        : null;
+      const isUsingFrozenFrame = Boolean(frozenState);
+      const frameWidth = frozenState?.width ?? video.videoWidth;
+      const frameHeight = frozenState?.height ?? video.videoHeight;
+
+      if (sourceCanvas.width !== frameWidth || sourceCanvas.height !== frameHeight) {
+        sourceCanvas.width = frameWidth;
+        sourceCanvas.height = frameHeight;
       }
       sourceCtx.setTransform(1, 0, 0, 1, 0, 0);
       sourceCtx.clearRect(0, 0, sourceCanvas.width, sourceCanvas.height);
-      sourceCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
 
-      const detectionTimestampMs = frameTimestampMs ?? video.currentTime * 1000;
-      const results = preferImageLandmarker
-        ? landmarkerRef.current.detect(sourceCanvas)
-        : landmarkerRef.current.detectForVideo(
-          sourceCanvas,
-          detectionTimestampMs
-        );
-      if (!isMounted) return;
+      let rawLandmarks: LipLandmark[] | null = null;
+      if (frozenState) {
+        sourceCtx.drawImage(frozenState.frameCanvas, 0, 0, frameWidth, frameHeight);
+        rawLandmarks = cloneLandmarks(frozenState.landmarks);
+      } else {
+        sourceCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
 
-      if (
-        !firstLandmarksMetricSentRef.current &&
-        results.faceLandmarks &&
-        results.faceLandmarks.length > 0
-      ) {
-        firstLandmarksMetricSentRef.current = true;
-        const sinceStartMs =
-          cameraStartRequestAtRef.current == null
-            ? null
-            : Math.round(performance.now() - cameraStartRequestAtRef.current);
-        window.parent?.postMessage(
-          {
-            type: "TRYON_METRIC",
-            stage: "first_landmarks",
-            sinceStartMs,
-          },
-          "*"
-        );
+        const detectionTimestampMs = frameTimestampMs ?? video.currentTime * 1000;
+        const results = preferImageLandmarker
+          ? landmarkerRef.current.detect(sourceCanvas)
+          : landmarkerRef.current.detectForVideo(
+            sourceCanvas,
+            detectionTimestampMs
+          );
+        if (!isMounted) return;
+
+        rawLandmarks = results.faceLandmarks?.[0] || null;
+        if (
+          etherealFreezeCompareEnabled &&
+          (!etherealCompareEnabled || compareCaptureRequestedRef.current) &&
+          rawLandmarks &&
+          !freezeCompareRef.current
+        ) {
+          const frameCopy = createCanvasFrameCopy(sourceCanvas);
+          if (frameCopy) {
+            freezeCompareRef.current = {
+              frameCanvas: frameCopy,
+              landmarks: cloneLandmarks(rawLandmarks),
+              capturedAtMs: performance.now(),
+              width: sourceCanvas.width,
+              height: sourceCanvas.height,
+            };
+            if (etherealCompareEnabled) {
+              compareCaptureRequestedRef.current = false;
+              setCompareCapturePending(false);
+              setCompareFrozen(true);
+            }
+          }
+        }
+
+        if (
+          !firstLandmarksMetricSentRef.current &&
+          results.faceLandmarks &&
+          results.faceLandmarks.length > 0
+        ) {
+          firstLandmarksMetricSentRef.current = true;
+          const sinceStartMs =
+            cameraStartRequestAtRef.current == null
+              ? null
+              : Math.round(performance.now() - cameraStartRequestAtRef.current);
+          window.parent?.postMessage(
+            {
+              type: "TRYON_METRIC",
+              stage: "first_landmarks",
+              sinceStartMs,
+            },
+            "*"
+          );
+        }
       }
-
-      const rawLandmarks = results.faceLandmarks?.[0] || null;
       const currentProductData = productDataRef.current;
       if (!currentProductData) {
         scheduleNext();
         return;
       }
       const isLipBloom = isLipBloomProduct(currentProductData);
+      const isEthereal = isEtherealProduct(currentProductData);
       const lipRegions = getLipRegionIndices(currentProductData);
       const hasLipRegions =
         lipRegions.outerIndices.length > 0 &&
@@ -1263,7 +1593,9 @@ export default function FaceMeshComponent({
         lipRegions.allIndices.length > 0;
       const sourceLandmarks = rawLandmarks;
 
-      const trackedLandmarks = sourceLandmarks
+      const trackedLandmarks = isLipBloom && lipOilRenderer
+        ? lipOilRenderer.track(sourceCtx, sourceLandmarks, frameWidth, frameHeight, frameTimestampMs ?? video.currentTime * 1000)
+        : sourceLandmarks
         ? hasLipRegions
           ? stabilizeLipLandmarks(
             stabilizedLandmarksRef.current,
@@ -1284,8 +1616,8 @@ export default function FaceMeshComponent({
           lipRegions.allIndices,
           canonicalLipShapeRef.current,
           smoothedLipLocalPoseRef.current,
-          video.videoWidth,
-          video.videoHeight
+          frameWidth,
+          frameHeight
         )
         : null;
       const landmarks =
@@ -1298,14 +1630,14 @@ export default function FaceMeshComponent({
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const baseScale = Math.max(
-        canvas.width / video.videoWidth,
-        canvas.height / video.videoHeight
+        canvas.width / frameWidth,
+        canvas.height / frameHeight
       );
       const scale = baseScale * zoomRef.current;
       const baseOffsetX =
-        (canvas.width - video.videoWidth * scale) / 2;
+        (canvas.width - frameWidth * scale) / 2;
       const baseOffsetY =
-        (canvas.height - video.videoHeight * scale) / 2;
+        (canvas.height - frameHeight * scale) / 2;
       let offsetX = baseOffsetX;
       let offsetY = baseOffsetY;
       let frameTargetX = canvas.width * 0.5;
@@ -1324,8 +1656,8 @@ export default function FaceMeshComponent({
             );
             if (lipAnchor) {
               nextAnchor = {
-                x: lipAnchor.x * video.videoWidth,
-                y: lipAnchor.y * video.videoHeight,
+                x: lipAnchor.x * frameWidth,
+                y: lipAnchor.y * frameHeight,
               };
               anchorFollowAlphaX = 0.84;
               anchorFollowAlphaY = 0.92;
@@ -1345,8 +1677,8 @@ export default function FaceMeshComponent({
             const nose = rawLandmarks[1];
             if (nose) {
               nextAnchor = {
-                x: nose.x * video.videoWidth,
-                y: nose.y * video.videoHeight,
+                x: nose.x * frameWidth,
+                y: nose.y * frameHeight,
               };
             }
           }
@@ -1354,13 +1686,17 @@ export default function FaceMeshComponent({
           const nose = rawLandmarks[1];
           if (nose) {
             nextAnchor = {
-              x: nose.x * video.videoWidth,
-              y: nose.y * video.videoHeight,
+              x: nose.x * frameWidth,
+              y: nose.y * frameHeight,
             };
           }
         }
 
         if (nextAnchor) {
+          if (etherealFreezeCompareEnabled) {
+            anchorFollowAlphaX = 1;
+            anchorFollowAlphaY = 1;
+          }
           const prevAnchor = faceAnchorRef.current;
           const smoothedAnchor = prevAnchor
             ? {
@@ -1388,8 +1724,8 @@ export default function FaceMeshComponent({
             offsetY = rawTargetOffsetY;
           }
 
-          const minOffsetX = canvas.width - video.videoWidth * scale;
-          const minOffsetY = canvas.height - video.videoHeight * scale;
+          const minOffsetX = canvas.width - frameWidth * scale;
+          const minOffsetY = canvas.height - frameHeight * scale;
           offsetX = Math.min(0, Math.max(minOffsetX, offsetX));
           offsetY = Math.min(0, Math.max(minOffsetY, offsetY));
         }
@@ -1409,7 +1745,11 @@ export default function FaceMeshComponent({
       // a softer premium-looking skin environment.
       let cameraFrameCanvas: HTMLCanvasElement = sourceCanvas;
 
-      if (beautyFilterRef.current) {
+      const exposureGain = isEthereal
+        ? etherealExposure.update(sourceCanvas, rawLandmarks, performance.now(), isUsingFrozenFrame)
+        : 1;
+      const compareOriginalCamera = etherealCompareEnabled && compareRawCameraRef.current;
+      if (beautyFilterRef.current && !isLipBloom && !isEthereal) {
         try {
           beautyFilterRef.current.processFrame(sourceCanvas);
 
@@ -1427,11 +1767,11 @@ export default function FaceMeshComponent({
         makeupBaseCanvasRef.current = makeupBaseCanvas;
       }
       if (
-        makeupBaseCanvas.width !== video.videoWidth ||
-        makeupBaseCanvas.height !== video.videoHeight
+        makeupBaseCanvas.width !== frameWidth ||
+        makeupBaseCanvas.height !== frameHeight
       ) {
-        makeupBaseCanvas.width = video.videoWidth;
-        makeupBaseCanvas.height = video.videoHeight;
+        makeupBaseCanvas.width = frameWidth;
+        makeupBaseCanvas.height = frameHeight;
       }
       const makeupBaseCtx = makeupBaseCanvas.getContext("2d");
       if (!makeupBaseCtx) {
@@ -1445,13 +1785,54 @@ export default function FaceMeshComponent({
       makeupBaseCtx.filter = "none";
       makeupBaseCtx.imageSmoothingEnabled = true;
       makeupBaseCtx.imageSmoothingQuality = "high";
-      makeupBaseCtx.clearRect(0, 0, video.videoWidth, video.videoHeight);
-      makeupBaseCtx.drawImage(cameraFrameCanvas, 0, 0, video.videoWidth, video.videoHeight);
+      makeupBaseCtx.clearRect(0, 0, frameWidth, frameHeight);
+      makeupBaseCtx.drawImage(cameraFrameCanvas, 0, 0, frameWidth, frameHeight);
 
-      // El resto del maquillaje sigue pintándose en 2D sobre la base beautificada.
-      // Lip Bloom queda temporalmente en un pase 2D limpio mientras se
-      // reconstruye la siguiente etapa sobre una malla anatómica real.
-      if (landmarks) {
+      // Lip Bloom owns pigment and coating in Three on the same camera frame.
+      // Other families retain their calibrated canvas finishes.
+      if (etherealFixtureCaptureEnabled && landmarks && !fixtureCaptureDoneRef.current) {
+        fixtureCaptureDoneRef.current = true;
+        const fixture: EtherealFixture = {
+          kind: "ethereal_fixture_v1",
+          width: frameWidth,
+          height: frameHeight,
+          basePng: makeupBaseCanvas.toDataURL("image/png"),
+          landmarks: cloneLandmarks(landmarks),
+          productData: currentProductData,
+          createdAt: new Date().toISOString(),
+          userAgent:
+            typeof navigator === "undefined" ? undefined : navigator.userAgent,
+          productName: currentProductData.display_name,
+        };
+        (window as any).__idonyEtherealFixture = fixture;
+        downloadEtherealFixture(fixture);
+        setFixtureDebugState({
+          status: "captured",
+          message: `Downloaded fixture ${fixture.width}x${fixture.height}`,
+        });
+      }
+
+      let toneYawFade = 1;
+      if (isEthereal && etherealRenderer) {
+        // The Ethereal renderer owns camera + coating + one exposure transform.
+        // Draw even without a face: camera presentation must continue on loss.
+        applyTone(makeupBaseCtx, rawLandmarks || [], currentProductData,
+          frameWidth, frameHeight, hexToRgba, 1, undefined, {
+            renderer: etherealRenderer, source: sourceCanvas,
+            exposureGain: compareOriginalCamera ? 1 : exposureGain,
+            enabled: !etherealCompareEnabled || compareProductEnabledRef.current,
+            frozen: isUsingFrozenFrame, timestampMs: performance.now(),
+            onRendered: (lighting) => {
+              etherealRenderStateRef.current = {
+                exposureGain: compareOriginalCamera ? 1 : exposureGain,
+                lighting: { ...lighting, direction: [...lighting.direction] },
+                revision: etherealRenderer.revision,
+                material: etherealRenderer.material,
+                surface: etherealRenderer.surfaceState,
+              };
+            },
+          });
+      } else if (landmarks && (!etherealCompareEnabled || compareProductEnabledRef.current)) {
         // Derive yaw from the same smoothed landmarks used for centering/rendering
         // so gloss fade and lip geometry do not jitter against the frame anchor.
         const leftTemple = landmarks[234];
@@ -1468,42 +1849,24 @@ export default function FaceMeshComponent({
             : 0;
         const faceYaw = Math.abs(signedFaceYaw);
         const yawFade = Math.max(0, Math.min(1, 1 - (faceYaw - 0.15) / 0.25));
+        toneYawFade = yawFade;
         const lipBandClipPath =
           shouldUseLipBandClip(currentProductData) && hasLipRegions
             ? buildLipBandClipPath(
               landmarks,
               lipRegions.outerIndices,
               lipRegions.innerIndices,
-              video.videoWidth,
-              video.videoHeight
+              frameWidth,
+              frameHeight
             )
             : null;
 
+        const useDirectCheekDebug = shouldUseDirectCheekDebugRender(currentProductData);
+
         if (isLipBloom) {
-          if (lipBandClipPath) {
-            makeupBaseCtx.save();
-            makeupBaseCtx.clip(lipBandClipPath);
-            applyTone(
-              makeupBaseCtx,
-              landmarks,
-              currentProductData,
-              video.videoWidth,
-              video.videoHeight,
-              hexToRgba,
-              yawFade,
-            );
-            makeupBaseCtx.restore();
-          } else {
-            applyTone(
-              makeupBaseCtx,
-              landmarks,
-              currentProductData,
-              video.videoWidth,
-              video.videoHeight,
-              hexToRgba,
-              yawFade,
-            );
-          }
+          applyTone(makeupBaseCtx, landmarks, currentProductData, frameWidth, frameHeight, hexToRgba, yawFade, lipOilRenderer);
+        } else if (useDirectCheekDebug) {
+          // Debug direct mode paints on the final canvas below.
         } else if (lipBandClipPath) {
           makeupBaseCtx.save();
           makeupBaseCtx.clip(lipBandClipPath);
@@ -1511,8 +1874,8 @@ export default function FaceMeshComponent({
             makeupBaseCtx,
             landmarks,
             currentProductData,
-            video.videoWidth,
-            video.videoHeight,
+            frameWidth,
+            frameHeight,
             hexToRgba,
             yawFade,
           );
@@ -1522,8 +1885,8 @@ export default function FaceMeshComponent({
             makeupBaseCtx,
             landmarks,
             currentProductData,
-            video.videoWidth,
-            video.videoHeight,
+            frameWidth,
+            frameHeight,
             hexToRgba,
             yawFade,
           );
@@ -1540,14 +1903,25 @@ export default function FaceMeshComponent({
       ctx.globalAlpha = 1.0;
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(makeupBaseCanvas, 0, 0, video.videoWidth, video.videoHeight);
+      ctx.drawImage(makeupBaseCanvas, 0, 0, frameWidth, frameHeight);
+      if (rawLandmarks && currentProductData && shouldUseDirectCheekDebugRender(currentProductData)) {
+        applyTone(
+          ctx,
+          rawLandmarks,
+          currentProductData,
+          frameWidth,
+          frameHeight,
+          hexToRgba,
+          toneYawFade,
+        );
+      }
       if (lipDebugShowContours && rawLandmarks && hasLipRegions) {
         drawDebugContour(
           ctx,
           rawLandmarks,
           lipRegions.outerIndices,
-          video.videoWidth,
-          video.videoHeight,
+          frameWidth,
+          frameHeight,
           "#76ff03",
           1.8 / Math.max(0.7, scale)
         );
@@ -1555,8 +1929,8 @@ export default function FaceMeshComponent({
           ctx,
           rawLandmarks,
           lipRegions.innerIndices,
-          video.videoWidth,
-          video.videoHeight,
+          frameWidth,
+          frameHeight,
           "#76ff03",
           1.2 / Math.max(0.7, scale)
         );
@@ -1565,8 +1939,8 @@ export default function FaceMeshComponent({
             ctx,
             landmarks,
             lipRegions.outerIndices,
-            video.videoWidth,
-            video.videoHeight,
+            frameWidth,
+            frameHeight,
             "#ff4081",
             1.8 / Math.max(0.7, scale)
           );
@@ -1574,12 +1948,15 @@ export default function FaceMeshComponent({
             ctx,
             landmarks,
             lipRegions.innerIndices,
-            video.videoWidth,
-            video.videoHeight,
+            frameWidth,
+            frameHeight,
             "#40c4ff",
             1.2 / Math.max(0.7, scale)
           );
         }
+      }
+      if (etherealFreezeCompareEnabled && !etherealCompareEnabled) {
+        drawFreezeCompareOverlay(ctx, freezeCompareRef.current, isUsingFrozenFrame);
       }
       ctx.filter = "none";
 
@@ -1600,9 +1977,23 @@ export default function FaceMeshComponent({
           lastVideoTimeRef.current = -1;
           resetLipRuntimeState();
         }
-        scheduleNext();
+        if (!isMounted) return;
+        if (isEtherealProduct(productData)) {
+          etherealRenderer = createEtherealRenderer(ETHEREAL_LIVE_MATERIAL);
+        }
+        if (isLipBloomProduct(productData)) {
+          const prepared = await createMobileLipOilRenderer();
+          if (!isMounted) { prepared.dispose(); return; }
+          lipOilRenderer = prepared;
+        }
+        if (isMounted) scheduleNext();
       } catch (error) {
         console.error("❌ FaceMesh init failed:", error);
+        if (isMounted) {
+          patchUiState({ isCameraOn: false, isStreamReady: false });
+          window.parent?.postMessage({ type: "TRYON_CAMERA_ERROR", message:
+            error instanceof Error ? error.message : "No se pudo preparar el render." }, "*");
+        }
       }
     };
 
@@ -1610,6 +2001,8 @@ export default function FaceMeshComponent({
 
     return () => {
       isMounted = false;
+      lipOilRenderer?.dispose();
+      etherealRenderer?.dispose();
       if (animationFrameId !== null) {
         cancelAnimationFrame(animationFrameId);
       }
@@ -1618,6 +2011,10 @@ export default function FaceMeshComponent({
       }
     };
   }, [
+    etherealFixtureCaptureEnabled,
+    etherealFreezeCompareEnabled,
+    etherealCompareEnabled,
+    etherealFixtureReplayEnabled,
     isStreamReady,
     lipDebugShowContours,
     productData,
@@ -1627,6 +2024,19 @@ export default function FaceMeshComponent({
   useEffect(() => {
     productDataRef.current = productData;
   }, [productData]);
+
+  useEffect(() => {
+    resetFreezeCompareState();
+  }, [etherealFreezeCompareEnabled, productData, resetFreezeCompareState]);
+
+  useEffect(() => {
+    resetFixtureState();
+  }, [resetFixtureState]);
+
+  useEffect(() => {
+    if (!etherealFixtureReplayEnabled) return;
+    void renderFixtureReplay();
+  }, [etherealFixtureReplayEnabled, productData, renderFixtureReplay, zoom]);
 
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
@@ -1647,6 +2057,7 @@ export default function FaceMeshComponent({
         cameraStartRequestAtRef.current = null;
         firstLandmarksMetricSentRef.current = false;
         faceAnchorRef.current = null;
+        resetFreezeCompareState();
         resetLipRuntimeState();
         patchUiState({
           isCameraOn: false,
@@ -1659,6 +2070,7 @@ export default function FaceMeshComponent({
         cameraStartRequestAtRef.current = performance.now();
         firstLandmarksMetricSentRef.current = false;
         faceAnchorRef.current = null;
+        resetFreezeCompareState();
         resetLipRuntimeState();
         patchUiState({
           isAwaitingVariantSync: true,
@@ -1712,6 +2124,7 @@ export default function FaceMeshComponent({
           cameraStartRequestAtRef.current = performance.now();
           firstLandmarksMetricSentRef.current = false;
           faceAnchorRef.current = null;
+          resetFreezeCompareState();
           resetLipRuntimeState();
           patchUiState({
             isStreamReady: false,
@@ -1742,7 +2155,7 @@ export default function FaceMeshComponent({
     return () => {
       window.removeEventListener("message", handleMessage, false);
     };
-  }, [patchUiState, resetLipRuntimeState]); // 👈 runs once, just sets up the listener in shopify for color swap
+  }, [patchUiState, resetFreezeCompareState, resetLipRuntimeState]); // 👈 runs once, just sets up the listener in shopify for color swap
 
   // When Shopify sends new variant → update the tone data
   useEffect(() => {
@@ -1800,6 +2213,7 @@ export default function FaceMeshComponent({
     patchUiState({ isStreamReady: true });
     lastVideoTimeRef.current = -1;
     faceAnchorRef.current = null;
+    resetFreezeCompareState();
     resetLipRuntimeState();
     const sinceStartMs =
       cameraStartRequestAtRef.current == null
@@ -1815,17 +2229,19 @@ export default function FaceMeshComponent({
     );
     // 🔔 Tell Shopify: camera + canvas are ready
     window.parent?.postMessage({ type: "TRYON_READY" }, "*");
-  }, [patchUiState, resetLipRuntimeState]);
+  }, [patchUiState, resetFreezeCompareState, resetLipRuntimeState]);
 
   const handleStreamStopped = useCallback(() => {
     patchUiState({ isStreamReady: false });
     faceAnchorRef.current = null;
+    resetFreezeCompareState();
     resetLipRuntimeState();
-  }, [patchUiState, resetLipRuntimeState]);
+  }, [patchUiState, resetFreezeCompareState, resetLipRuntimeState]);
 
   const handleStreamError = useCallback((error: Error) => {
     patchUiState({ isStreamReady: false });
     faceAnchorRef.current = null;
+    resetFreezeCompareState();
     resetLipRuntimeState();
     window.parent?.postMessage(
       {
@@ -1842,7 +2258,7 @@ export default function FaceMeshComponent({
       },
       "*"
     );
-  }, [patchUiState, resetLipRuntimeState]);
+  }, [patchUiState, resetFreezeCompareState, resetLipRuntimeState]);
 
   const stopCamera = useCallback(() => {
     cameraStartRequestAtRef.current = null;
@@ -1877,12 +2293,39 @@ export default function FaceMeshComponent({
     []
   );
 
+  const handleFixtureReplayFileChange = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.currentTarget.files?.[0];
+      event.currentTarget.value = "";
+      if (!file) return;
+
+      try {
+        const parsed = JSON.parse(await file.text());
+        if (!isValidEtherealFixture(parsed)) {
+          throw new Error("Invalid ethereal fixture JSON");
+        }
+        fixtureReplayRef.current = parsed;
+        setFixtureDebugState({
+          status: "loaded",
+          message: `Loaded ${file.name}`,
+        });
+        await renderFixtureReplay(parsed);
+      } catch (error) {
+        setFixtureDebugState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Could not load fixture",
+        });
+      }
+    },
+    [renderFixtureReplay]
+  );
+
   return (
     <div className="relative w-full h-full overflow-hidden bg-black">
       {/* VIDEO (invisible, only used for detection) */}
       <CameraFeed
         videoRef={videoRef}
-        isActive={isCameraOn}
+        isActive={!etherealFixtureReplayEnabled && isCameraOn}
         onStreamReady={handleStreamReady}
         onStreamStopped={handleStreamStopped}
         onStreamError={handleStreamError}
@@ -1913,8 +2356,92 @@ export default function FaceMeshComponent({
         </div>
       </div>
 
+      {etherealCompareAvailable && !etherealCompareEnabled && isCameraOn && (
+        <button type="button"
+          className="ethereal-compare-launch"
+          onClick={() => setComparePanelOpen(true)}>
+          Comparar Ethereal
+        </button>
+      )}
+
+      {etherealCompareEnabled && isCameraOn && (
+        <div className="ethereal-compare-panel">
+          <div className="font-semibold">Ethereal · {ETHEREAL_LIVE_REVISION}</div>
+          <div className="my-2" role="status">
+            {compareFrozen ? "Imagen congelada" : compareCapturePending ? "Esperando rostro…" : "Cámara en directo"}
+            {compareFrozen && (compareRawCamera ? " · Cámara original" : compareProductEnabled ? " · CON Ethereal · exposición compensada" : " · SIN Ethereal · exposición compensada")}
+          </div>
+          <button type="button" className="rounded border px-3 py-2" disabled={compareCapturePending}
+            onClick={() => {
+              if (compareFrozen) resetFreezeCompareState();
+              else {
+                compareCaptureRequestedRef.current = true;
+                setCompareCapturePending(true);
+              }
+            }}>
+            {compareFrozen ? "Volver al directo" : "Congelar imagen"}
+          </button>
+          <button type="button" className="mt-2 block rounded border px-3 py-2 disabled:opacity-40"
+            disabled={!compareFrozen} aria-pressed={compareProductEnabled}
+            onClick={() => {
+              compareRawCameraRef.current = false;
+              setCompareRawCamera(false);
+              const enabled = !compareProductEnabledRef.current;
+              compareProductEnabledRef.current = enabled;
+              setCompareProductEnabled(enabled);
+            }}>
+            {compareProductEnabled ? "Ver SIN Ethereal" : "Ver CON Ethereal"}
+          </button>
+          <button type="button" disabled={!compareFrozen} aria-pressed={compareRawCamera}
+            onClick={() => {
+              const raw = !compareRawCameraRef.current;
+              compareRawCameraRef.current = raw;
+              setCompareRawCamera(raw);
+              compareProductEnabledRef.current = false;
+              setCompareProductEnabled(false);
+            }}>
+            {compareRawCamera ? "Ver exposición compensada" : "Ver cámara original"}
+          </button>
+          <button type="button" disabled={!compareFrozen}
+            onClick={() => {
+              const frozen = freezeCompareRef.current;
+              if (!frozen || !productDataRef.current) return;
+              downloadEtherealFixture({
+                kind: "ethereal_fixture_v1", width: frozen.width, height: frozen.height,
+                basePng: frozen.frameCanvas.toDataURL("image/png"),
+                landmarks: cloneLandmarks(frozen.landmarks), productData: productDataRef.current,
+                renderState: etherealRenderStateRef.current,
+                createdAt: new Date().toISOString(),
+                productName: productDataRef.current.display_name,
+              });
+            }}>
+            Guardar prueba para revisar
+          </button>
+        </div>
+      )}
+
+      {etherealFixtureReplayEnabled && (
+        <div className="absolute left-4 top-4 z-50 max-w-sm rounded-md bg-black/80 p-3 text-xs text-white shadow-lg">
+          <div className="mb-2 font-semibold">Ethereal fixture replay</div>
+          <input
+            type="file"
+            accept="application/json"
+            onChange={handleFixtureReplayFileChange}
+            className="block w-full text-xs"
+          />
+          <div className="mt-2 opacity-80">{fixtureDebugState.message}</div>
+        </div>
+      )}
+
+      {etherealFixtureCaptureEnabled && (
+        <div className="absolute left-4 top-4 z-50 max-w-sm rounded-md bg-black/80 p-3 text-xs text-white shadow-lg">
+          <div className="font-semibold">Ethereal fixture capture</div>
+          <div className="mt-1 opacity-80">{fixtureDebugState.message}</div>
+        </div>
+      )}
+
       {/* REACTIVATE CAMERA BUTTON */}
-      {!isCameraOn && (
+      {!etherealFixtureReplayEnabled && !isCameraOn && (
         <button
           onClick={() => patchUiState({ isCameraOn: true })}
           className="absolute bottom-4 left-1/2 -translate-x-1/2 px-6 py-2 bg-black text-white rounded-md shadow-md hover:bg-gray-800 z-50"

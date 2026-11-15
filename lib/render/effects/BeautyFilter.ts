@@ -48,6 +48,7 @@ const vertexShader = `
 const fragmentShader = `
   precision highp float;
   uniform sampler2D uTexture;
+  uniform float uNeutralExposureGain;
   uniform vec2 uTexelSize;
   uniform float uSmoothingStrength;
   uniform float uEdgeThreshold;
@@ -127,6 +128,14 @@ const fragmentShader = `
     vec4 centerSample = texture2D(uTexture, vTexCoord);
     vec3 centerColor = centerSample.rgb;
     float alpha = centerSample.a;
+    if (uNeutralExposureGain > 0.0) {
+      // One common RGB gain preserves channel ratios; highlight protection
+      // avoids whitening bright skin. No blur, bloom or artificial softbox.
+      float peak = max(centerColor.r, max(centerColor.g, centerColor.b));
+      float gain = 1.0 + (uNeutralExposureGain - 1.0) * (1.0 - peak);
+      gl_FragColor = vec4(centerColor * gain, alpha);
+      return;
+    }
     float centerLum = getLuminance(centerColor);
 
     // ===== PILLAR 1: SMOOTH SHADOW MASK (Continuous Fade) =====
@@ -413,7 +422,8 @@ export class BeautyFilter {
    */
   processFrame(
     canvas: HTMLCanvasElement,
-    params: Partial<BeautyFilterParams> = {}
+    params: Partial<BeautyFilterParams> = {},
+    neutralExposureGain = 0
   ): void {
     const finalParams = { ...defaultParams, ...params };
 
@@ -476,6 +486,10 @@ export class BeautyFilter {
     this.gl.enableVertexAttribArray(texLoc);
 
     // Set uniforms
+    this.gl.uniform1f(
+      this.gl.getUniformLocation(this.program, "uNeutralExposureGain"),
+      neutralExposureGain > 0 ? Math.max(1, Math.min(1.55, neutralExposureGain)) : 0
+    );
     this.gl.uniform1i(
       this.gl.getUniformLocation(this.program, "uTexture"),
       0
