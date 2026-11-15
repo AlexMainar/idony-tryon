@@ -428,8 +428,10 @@ export class BeautyFilter {
     const finalParams = { ...defaultParams, ...params };
 
     // Set up WebGL canvas size to match input
-    this.gl.canvas.width = canvas.width;
-    this.gl.canvas.height = canvas.height;
+    // Assigning an unchanged backing size still resets the drawing buffer.
+    // Keep GPU resources in place while the camera resolution is stable.
+    if (this.gl.canvas.width !== canvas.width) this.gl.canvas.width = canvas.width;
+    if (this.gl.canvas.height !== canvas.height) this.gl.canvas.height = canvas.height;
     this.gl.viewport(0, 0, canvas.width, canvas.height);
 
     // Bind input canvas as texture

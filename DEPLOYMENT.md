@@ -1,30 +1,39 @@
-The approved products use the unified mobile renderer on all browsers. Ethereal
-uses `ethereal-film-09` in both development and production builds. Comparison
-controls remain development-only.
+The approved products use the mobile renderer on all browsers. Ethereal uses
+`ethereal-film-09` in development and production. Comparison controls are
+development-only.
 
-The Shopify preview uses this iframe base:
+Shopify has two unpublished test themes with distinct iframe destinations:
 
-`https://shopify-preview---idony-tryon-ciiectq4ra-ew.a.run.app/tryon`
+| Theme | ID | Script | Iframe base |
+| --- | --- | --- | --- |
+| DEV_Idony_Try-On | 189213442385 | `app/product.liquid` | `https://idonytryon.eu.ngrok.io/tryon` |
+| Live_Idony Try-On | 194818965841 | `shopify/tryon-live-script.liquid` | `https://tryon.idonycosmetics.com/tryon` |
 
-The try-on script in `app/product.liquid` matches the supplied Shopify script;
-only `TRYON_IFRAME_BASE` changes from the ngrok URL. Copy that script into the
-unpublished test theme. Publishing the Shopify theme is a separate manual step.
-The exact script block is also available in
-`shopify/tryon-preview-script.liquid` for copying without replacing the theme's
-other product markup.
+The script blocks are identical except for `TRYON_IFRAME_BASE`. The DEV theme
+uses the local development server through ngrok. The LIVE test theme uses the
+production build on Google Cloud. Neither theme is published by this workflow.
 
-Validate the production build and renderer checks before committing/pushing.
-Then deploy the committed source with:
+Cloud Run project/service: `idony-tryon`; region: `europe-west1`. The custom
+domain `tryon.idonycosmetics.com` maps to this service. The main Shopify domain
+`www.idonycosmetics.com` is separate.
+
+Validate the production build and renderer checks, then commit and push. Build
+the committed source as a no-traffic candidate first:
 
 ```bash
 bash scripts/deploy-shopify-preview.sh
 ```
 
-The script targets project `idony-tryon`, service `idony-tryon`, region
-`europe-west1`. It exports only committed files and deploys with `--no-traffic`
-and tag `shopify-preview`. Existing runtime Shopify variables are inherited;
-local environment files and camera captures are excluded from uploads.
+The script exports committed source, inherits runtime Shopify variables and
+excludes local environment files and camera captures. Its `shopify-preview` tag
+is an internal verification URL, not the destination used by the Shopify LIVE
+theme. After verifying the candidate, promote the exact revision to the custom
+domain:
 
-The script verifies that the existing service traffic is preserved and prints
-the preview revision URL. It does not change Shopify or the custom domain's
-traffic. Future runs move the preview tag to the new committed revision.
+```bash
+gcloud run services update-traffic idony-tryon --project idony-tryon --region europe-west1 --to-revisions=REVISION_NAME=100 --quiet
+```
+
+This updates the backend behind the custom domain. Publishing a Shopify theme
+remains a separate step controlled by the store owner. Roll back by assigning
+100 percent to the previous revision recorded in the deployment traffic snapshot.

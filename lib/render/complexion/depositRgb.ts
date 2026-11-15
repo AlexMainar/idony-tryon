@@ -175,6 +175,59 @@ const getLayerFieldWeight = (
   return Math.pow(fieldWeight, Math.max(0.1, layer.falloffPower ?? 1));
 };
 
+/** Sample the same Gaussian at pixel centres without repeating trigonometry,
+ * square roots, exponentials and powers for every camera pixel. Start at the
+ * row's peak and step outwards so distant/underflowing tails cannot erase the
+ * centre. Storage is bounded to a scanline per layer, not a frame history. */
+const createFieldRow = (layer: DepositFieldLayer, width: number) => {
+  const values = new Float64Array(width);
+  const gaussian = !layer.fieldLine?.length &&
+    (!layer.falloff || layer.falloff === "gaussian");
+  const { axisDir, liftDir } = getDirectionalBasis(layer.rotation);
+  const power = Math.max(0.1, layer.falloffPower ?? 1);
+  const baseX = Math.max(1, layer.radiusX);
+  const negativeX = Math.max(1, layer.negativeRadiusX ?? baseX);
+  const positiveX = Math.max(1, layer.positiveRadiusX ?? baseX);
+  const positive = negativeX === positiveX ? values : new Float64Array(width);
+
+  const fillGaussian = (out: Float64Array, radiusX: number, radiusY: number,
+    axis: number, lift: number) => {
+    const ix = power / (radiusX * radiusX), iy = power / (radiusY * radiusY);
+    const a = axisDir.x * axisDir.x * ix + liftDir.x * liftDir.x * iy;
+    const b = 2 * (axis * axisDir.x * ix + lift * liftDir.x * iy);
+    const centre = Math.max(0, Math.min(width - 1, Math.round(-b / (2 * a))));
+    const cx = axis + centre * axisDir.x, cy = lift + centre * liftDir.x;
+    const peak = Math.exp(-(cx * cx * ix + cy * cy * iy));
+    out[centre] = peak;
+    const decay = Math.exp(-2 * a);
+    let value = peak, step = Math.exp(-(2 * a * centre + a + b));
+    for (let x = centre + 1; x < width; x++) {
+      value *= step; out[x] = value; step *= decay;
+    }
+    value = peak; step = Math.exp(2 * a * centre - a + b);
+    for (let x = centre - 1; x >= 0; x--) {
+      value *= step; out[x] = value; step *= decay;
+    }
+  };
+
+  return { values, update(startX: number, canvasY: number) {
+    if (!gaussian) {
+      for (let x = 0; x < width; x++) values[x] = getLayerFieldWeight(layer, startX + x, canvasY);
+      return;
+    }
+    const dx = startX - layer.centerX, dy = canvasY - layer.centerY;
+    const axis = dx * axisDir.x + dy * axisDir.y;
+    const lift = dx * liftDir.x + dy * liftDir.y;
+    const baseY = Math.max(1, layer.radiusY);
+    const radiusY = canvasY >= layer.centerY ? Math.max(baseY, layer.lowerRadiusY ?? baseY) : baseY;
+    fillGaussian(values, negativeX, radiusY, axis, lift);
+    if (positive !== values) {
+      fillGaussian(positive, positiveX, radiusY, axis, lift);
+      for (let x = 0; x < width; x++) if (axis + x * axisDir.x >= 0) values[x] = positive[x];
+    }
+  } };
+};
+
 const smoothstep = (edge0: number, edge1: number, x: number) => {
   const t = clamp01((x - edge0) / Math.max(1e-5, edge1 - edge0));
   return t * t * (3 - 2 * t);
@@ -289,14 +342,14 @@ const renderDepositLayers = (
   ctx: CanvasRenderingContext2D,
   targetColor: string,
   layers: DepositFieldLayer[],
-  resolvePixel: (
+  resolvePixel: ((
     source: RgbColor,
     target: RgbColor,
     weight: number,
     canvasX: number,
     canvasY: number,
     localLuma: number
-  ) => RgbColor,
+  ) => RgbColor) | null,
   localLumaRadius = 0
 ) => {
   const bounds = getLayersBounds(ctx, layers);
@@ -310,8 +363,59 @@ const renderDepositLayers = (
     ? buildLumaIntegral(data, boxWidth, boxHeight)
     : null;
   const lumaStride = boxWidth + 1;
+  const fields = layers.map(layer => ({
+    layer, row: createFieldRow(layer, boxWidth),
+    responseFloor: clamp01(layer.responseFloor ?? 0),
+    responseInfluence: clamp01(layer.responseInfluence ?? 1),
+  }));
+
+  // The mobile blush/bronzer fields all use this RGB deposit. Keep their hot
+  // loop numeric: no per-pixel callback, RGB objects or repeated colour clamps.
+  if (!resolvePixel && fields.every(field => !field.layer.clipToPath)) {
+    const tr=target.r,tg=target.g,tb=target.b;
+    if (fields.length === 1) {
+      const field=fields[0],row=field.row.values,strength=field.layer.strength;
+      const floor=field.responseFloor,influence=field.responseInfluence;
+      for (let y=0;y<boxHeight;y++) {
+        field.row.update(boxMinX+.5,boxMinY+y+.5);
+        let index=y*boxWidth*4;
+        for (let x=0;x<boxWidth;x++,index+=4) {
+          const r=data[index],g=data[index+1],b=data[index+2];
+          const response=Math.sqrt((.299*r+.587*g+.114*b)/255);
+          const weight=row[x]*strength*(1+(Math.max(response,floor)-1)*influence);
+          if (weight<=1e-5) continue;
+          const amount=Math.min(1,weight);
+          data[index]=Math.round(r+(tr-r)*amount);
+          data[index+1]=Math.round(g+(tg-g)*amount);
+          data[index+2]=Math.round(b+(tb-b)*amount);
+        }
+      }
+    } else {
+      for (let y=0;y<boxHeight;y++) {
+        for (const field of fields) field.row.update(boxMinX+.5,boxMinY+y+.5);
+        let index=y*boxWidth*4;
+        for (let x=0;x<boxWidth;x++,index+=4) {
+          const r=data[index],g=data[index+1],b=data[index+2];
+          const response=Math.sqrt((.299*r+.587*g+.114*b)/255);
+          let weight=0;
+          for (let i=0;i<fields.length;i++) {
+            const f=fields[i];
+            weight+=f.row.values[x]*f.layer.strength*(1+(Math.max(response,f.responseFloor)-1)*f.responseInfluence);
+          }
+          if (weight<=1e-5) continue;
+          const amount=Math.min(1,weight);
+          data[index]=Math.round(r+(tr-r)*amount);
+          data[index+1]=Math.round(g+(tg-g)*amount);
+          data[index+2]=Math.round(b+(tb-b)*amount);
+        }
+      }
+    }
+    ctx.putImageData(imageData,boxMinX,boxMinY);
+    return;
+  }
 
   for (let y = 0; y < boxHeight; y += 1) {
+    for (const field of fields) field.row.update(boxMinX + 0.5, boxMinY + y + 0.5);
     for (let x = 0; x < boxWidth; x += 1) {
       const canvasX = boxMinX + x + 0.5;
       const canvasY = boxMinY + y + 0.5;
@@ -324,7 +428,8 @@ const renderDepositLayers = (
 
       let totalWeight = 0;
 
-      for (const layer of layers) {
+      for (const field of fields) {
+        const { layer } = field;
         let edgeFeatherWeight = 1;
         if (
           layer.clipToPath &&
@@ -360,12 +465,12 @@ const renderDepositLayers = (
           if (edgeFeatherWeight <= 1e-4) continue;
         }
 
-        const fieldWeight = getLayerFieldWeight(layer, canvasX, canvasY);
-        const effectiveResponseRaw = Math.max(response, clamp01(layer.responseFloor ?? 0));
+        const fieldWeight = field.row.values[x];
+        const effectiveResponseRaw = Math.max(response, field.responseFloor);
         const effectiveResponse = lerp(
           1,
           effectiveResponseRaw,
-          clamp01(layer.responseInfluence ?? 1)
+          field.responseInfluence
         );
 
         totalWeight +=
@@ -391,7 +496,9 @@ const renderDepositLayers = (
           lumaIntegral[y0 * lumaStride + x0]
         ) / ((x1 - x0) * (y1 - y0));
       }
-      const next = resolvePixel({ r, g, b }, target, weight, canvasX, canvasY, localLuma);
+      const next = resolvePixel
+        ? resolvePixel({ r, g, b }, target, weight, canvasX, canvasY, localLuma)
+        : {r:lerp(r,target.r,weight),g:lerp(g,target.g,weight),b:lerp(b,target.b,weight)};
       data[pixelIndex] = clampByte(next.r);
       data[pixelIndex + 1] = clampByte(next.g);
       data[pixelIndex + 2] = clampByte(next.b);
@@ -406,11 +513,7 @@ export function renderDepositRgbLayers(
   targetColor: string,
   layers: DepositFieldLayer[]
 ) {
-  renderDepositLayers(ctx, targetColor, layers, (source, target, weight) => ({
-    r: lerp(source.r, target.r, weight),
-    g: lerp(source.g, target.g, weight),
-    b: lerp(source.b, target.b, weight),
-  }));
+  renderDepositLayers(ctx, targetColor, layers, null);
 }
 
 export function renderLuminizerGlowLayers(

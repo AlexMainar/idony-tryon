@@ -10,6 +10,7 @@ import type { FaceLandmarker } from "@mediapipe/tasks-vision";
 import productsCatalog from "@/data/products.json";
 import { initFaceLandmarker } from "@/lib/face/detectLandmarks";
 import { applyTone, shouldUseDirectCheekDebugRender } from "@/lib/render/applyTone";
+import { createCameraFrameLoop } from "@/lib/render/mobile/cameraFrameLoop";
 import { createMobileLipOilRenderer, type MobileLipOilRenderer } from "@/lib/render/mobile/applyMobileLipOilTone";
 import {
   hexToRgba,
@@ -1426,29 +1427,18 @@ export default function FaceMeshComponent({
     let lipOilRenderer: MobileLipOilRenderer | undefined;
     let etherealRenderer: EtherealRenderer | undefined;
     const etherealExposure = createEtherealExposure();
-    let animationFrameId: number | null = null;
-    let videoFrameCallbackId: number | null = null;
-    // Use the same IMAGE-mode detection path that already works for lip oil.
-    // This keeps camera reopen behavior identical across all products and
-    // avoids MediaPipe video-timestamp state surviving a close/open cycle.
     const preferImageLandmarker = true;
-
-    const scheduleNext = () => {
-      if (!isMounted) return;
-      if (etherealCompareEnabled && freezeCompareRef.current) {
-        animationFrameId = requestAnimationFrame(() => detectFace());
-        return;
-      }
-      const video = videoRef.current;
-      if (video && typeof video.requestVideoFrameCallback === "function") {
-        videoFrameCallbackId = video.requestVideoFrameCallback((_, metadata) => {
-          videoFrameCallbackId = null;
-          detectFace(metadata.mediaTime * 1000);
-        });
-        return;
-      }
-      animationFrameId = requestAnimationFrame(() => detectFace());
-    };
+    let frameErrorReported = false;
+    const frameLoop = createCameraFrameLoop({
+      video: () => videoRef.current,
+      frozen: () => !!(etherealCompareEnabled && freezeCompareRef.current),
+      draw: timestamp => detectFace(timestamp),
+      onError: error => {
+        // A failed frame must not permanently stop camera presentation.
+        if (!frameErrorReported) console.error("❌ Try-on frame failed:", error);
+        frameErrorReported = true;
+      },
+    });
 
     const detectFace = (frameTimestampMs?: number) => {
       if (!isMounted) return;
@@ -1458,7 +1448,6 @@ export default function FaceMeshComponent({
         !canvasRef.current ||
         !landmarkerRef.current
       ) {
-        scheduleNext();
         return;
       }
 
@@ -1468,7 +1457,6 @@ export default function FaceMeshComponent({
       let sourceCanvas = sourceFrameCanvasRef.current;
 
       if (!ctx) {
-        scheduleNext();
         return;
       }
       if (!sourceCanvas) {
@@ -1477,13 +1465,11 @@ export default function FaceMeshComponent({
       }
       const sourceCtx = sourceCanvas.getContext("2d");
       if (!sourceCtx) {
-        scheduleNext();
         return;
       }
 
       // Esperar a que el vídeo tenga metadata
       if (!video.videoWidth || !video.videoHeight) {
-        scheduleNext();
         return;
       }
 
@@ -1494,7 +1480,6 @@ export default function FaceMeshComponent({
         frameTimestampMs == null &&
         video.currentTime === lastVideoTimeRef.current
       ) {
-        scheduleNext();
         return;
       }
       lastVideoTimeRef.current = video.currentTime;
@@ -1581,7 +1566,6 @@ export default function FaceMeshComponent({
       }
       const currentProductData = productDataRef.current;
       if (!currentProductData) {
-        scheduleNext();
         return;
       }
       const isLipBloom = isLipBloomProduct(currentProductData);
@@ -1775,7 +1759,6 @@ export default function FaceMeshComponent({
       }
       const makeupBaseCtx = makeupBaseCanvas.getContext("2d");
       if (!makeupBaseCtx) {
-        scheduleNext();
         return;
       }
 
@@ -1960,7 +1943,6 @@ export default function FaceMeshComponent({
       }
       ctx.filter = "none";
 
-      scheduleNext();
     };
 
     const init = async () => {
@@ -1986,7 +1968,7 @@ export default function FaceMeshComponent({
           if (!isMounted) { prepared.dispose(); return; }
           lipOilRenderer = prepared;
         }
-        if (isMounted) scheduleNext();
+        if (isMounted) frameLoop.start();
       } catch (error) {
         console.error("❌ FaceMesh init failed:", error);
         if (isMounted) {
@@ -2003,12 +1985,7 @@ export default function FaceMeshComponent({
       isMounted = false;
       lipOilRenderer?.dispose();
       etherealRenderer?.dispose();
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId);
-      }
-      if (videoFrameCallbackId !== null && videoRef.current) {
-        videoRef.current.cancelVideoFrameCallback(videoFrameCallbackId);
-      }
+      frameLoop.stop();
     };
   }, [
     etherealFixtureCaptureEnabled,
