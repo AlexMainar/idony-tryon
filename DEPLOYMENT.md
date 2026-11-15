@@ -2,6 +2,11 @@ The approved products use the mobile renderer on all browsers. Ethereal uses
 `ethereal-film-09` in development and production. Comparison controls are
 development-only.
 
+The 15 November update includes the current lip anchoring/jitter adjustments,
+the stronger Lipstick pigment validated by Alex, and mobile pigment GPU execution.
+It is released to the LIVE test theme for marketing review on 16 November;
+remaining visual corrections and approval status are tracked in [BACKLOG.md](BACKLOG.md).
+
 Shopify has two unpublished test themes with distinct iframe destinations:
 
 | Theme | ID | Script | Iframe base |

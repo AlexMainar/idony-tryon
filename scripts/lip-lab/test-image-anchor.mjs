@@ -23,3 +23,23 @@ assert.equal(tracker.update(frame(),null,width,height,1133),null,'lost face rese
 assert.equal(tracker.update(frame(),points(),width,height,1166),null,'reacquire without old correction');
 assert.equal(tracker.update(frame(),points(),width,height,2000),null,'long gap resets');
 console.log('Low texture, face loss, reacquisition and frame gaps: passed');
+
+// A stationary image with coherent detector scale/roll noise must not make
+// the painted lip breathe. Correct geometry, without slowing actual motion.
+const poseTracker=createImageAnchor(),poseBase=points();
+poseTracker.update(frame(),poseBase,width,height,0);
+let rawPoseError=0,anchoredPoseError=0;
+for(let i=1;i<=45;i++){
+ const scale=1+(i%2?.012:-.012),angle=i%2?.012:-.012;
+ const raw=poseBase.map(p=>{const x=p.x*width-125,y=p.y*height-90;return {...p,x:(125+scale*(x*Math.cos(angle)-y*Math.sin(angle)))/width,y:(90+scale*(x*Math.sin(angle)+y*Math.cos(angle)))/height};});
+ const c=poseTracker.update(frame(),raw,width,height,i*1000/30);
+ assert(c&&c.matches>=5);
+ const vx=(raw[291].x-raw[61].x)*width,vy=(raw[291].y-raw[61].y)*height;
+ const bx=(poseBase[291].x-poseBase[61].x)*width,by=(poseBase[291].y-poseBase[61].y)*height;
+ const a=1+(c.scaleDelta??0),b=c.rotationDelta??0;
+ rawPoseError+=(vx-bx)**2+(vy-by)**2;
+ anchoredPoseError+=(a*vx-b*vy-bx)**2+(b*vx+a*vy-by)**2;
+ assert(Math.abs(c.motion.width??1)<.5,'image motion distinguishes detector width noise from a real purse');
+}
+assert(anchoredPoseError<rawPoseError*.4,'image texture corrects scale and roll noise');
+console.log('Image-confirmed pose jitter RMS: '+Math.sqrt(rawPoseError/45).toFixed(3)+'px → '+Math.sqrt(anchoredPoseError/45).toFixed(3)+'px');

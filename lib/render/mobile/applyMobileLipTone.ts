@@ -19,7 +19,8 @@ export function applyMobileLipTone(
     productData,
     width,
     height,
-    hexToRgba
+    hexToRgba,
+    true
   );
   return true;
 }

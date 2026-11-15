@@ -1,6 +1,17 @@
 type RgbColor = { r: number; g: number; b: number };
 type Point = { x: number; y: number };
 
+export type RgbDepositPass = { color: string; layers: DepositFieldLayer[] };
+const framePasses = new WeakMap<CanvasRenderingContext2D, RgbDepositPass[]>();
+/** Capture the approved preset's geometry and pass order for the mobile GPU
+ * renderer. This does not capture camera pixels or retain frame history. */
+export function collectRgbDeposits<T>(ctx: CanvasRenderingContext2D, draw: () => T) {
+  const passes: RgbDepositPass[]=[];
+  framePasses.set(ctx,passes);
+  try { return {result:draw(),passes}; }
+  finally { framePasses.delete(ctx); }
+}
+
 export type DepositFieldLayer = {
   centerX: number;
   centerY: number;
@@ -513,6 +524,8 @@ export function renderDepositRgbLayers(
   targetColor: string,
   layers: DepositFieldLayer[]
 ) {
+  const queued=framePasses.get(ctx);
+  if(queued){queued.push({color:targetColor,layers});return;}
   renderDepositLayers(ctx, targetColor, layers, null);
 }
 

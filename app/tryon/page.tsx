@@ -14,7 +14,10 @@ export default function TryOnPage() {
     const landmarkerPreloadStartAt = performance.now();
     console.log("[TRYON PERF] page effect start");
 
-    void initFaceLandmarker("IMAGE")
+    const urlParams = new URLSearchParams(window.location.search);
+    const handle = urlParams.get("handle");
+    const lipProduct = handle === "lip-bloom" || handle === "barra-de-labios-velvet";
+    void initFaceLandmarker(lipProduct ? "VIDEO" : "IMAGE", lipProduct ? "lips" : "face")
       .then(() => {
         console.log("[TRYON PERF] face landmarker preload done", {
           ms: Math.round(performance.now() - landmarkerPreloadStartAt),
@@ -24,8 +27,6 @@ export default function TryOnPage() {
         console.error("❌ Preload FaceLandmarker failed:", error);
       });
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const handle = urlParams.get("handle");
     const variant = urlParams.get("variant");
     setVariantTitle(variant);
     if (!handle) {

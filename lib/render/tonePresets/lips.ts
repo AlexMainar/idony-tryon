@@ -58,6 +58,7 @@ const LIP_GRACE_PROFILES: Record<string, Partial<LipGraceProfile>> = {
 };
 
 const lipLocalShapeCache = new Map<string, LipLocalPoint[]>();
+const LIP_GRACE_PIGMENT_GAIN = 1.4;
 
 function getLipGraceProfile(productData: ProductToneData): LipGraceProfile {
   return {
@@ -322,7 +323,8 @@ export function renderLipGrace(
   productData: ProductToneData,
   width: number,
   height: number,
-  hexToRgba: (hex: string, opacity: number) => string
+  hexToRgba: (hex: string, opacity: number) => string,
+  geometryTracked = false
 ) {
   const outer = productData?.regions?.lips_outer
     ? normalizeRegion(productData.regions.lips_outer)
@@ -378,14 +380,16 @@ export function renderLipGrace(
   const innerSplit = Math.floor(innerPoints.length / 2);
   const lipFrame = buildLipFrame(rawCoverageOuterPoints, lipHeight);
   const smoothingKey = `${productData.display_name || "lip-grace"}:${width}x${height}`;
-  const coverageOuterPoints = smoothLipShapePoints(
+  // The mobile session already tracks this geometry against camera pixels.
+  // Applying a second temporal filter here makes pigment trail the real lip.
+  const coverageOuterPoints = geometryTracked ? rawCoverageOuterPoints : smoothLipShapePoints(
     `${smoothingKey}:outer`,
     rawCoverageOuterPoints,
     lipFrame,
     profile.shapeSmoothing,
     [0, outerSplit]
   );
-  const stabilizedInnerPoints = smoothLipShapePoints(
+  const stabilizedInnerPoints = geometryTracked ? innerPoints : smoothLipShapePoints(
     `${smoothingKey}:inner`,
     innerPoints,
     lipFrame,
@@ -401,7 +405,9 @@ export function renderLipGrace(
 
   const coreColor = hexToRgba(
     toneColor,
-    Math.min(1, productData.opacity * profile.coreOpacity)
+    // Calibrate final coverage once. The previous colour alpha was multiplied
+    // by coreAlpha a second time, leaving only 32–45% effective pigment.
+    Math.min(1, productData.opacity * profile.coreOpacity * profile.coreAlpha * LIP_GRACE_PIGMENT_GAIN)
   );
   const featherFillColor = hexToRgba(
     toneColor,
@@ -416,7 +422,7 @@ export function renderLipGrace(
 
   ctx.save();
   ctx.globalCompositeOperation = "multiply";
-  ctx.globalAlpha = profile.coreAlpha;
+  ctx.globalAlpha = 1;
   ctx.fillStyle = coreColor;
   ctx.fill(combined, "evenodd");
   ctx.restore();

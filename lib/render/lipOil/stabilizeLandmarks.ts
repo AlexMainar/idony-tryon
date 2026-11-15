@@ -1,4 +1,5 @@
 import type { LipPoint } from "./deformGeometry";
+import type { ImageLipCorrection } from "./imageAnchor";
 
 // Fit motion close to the mouth. Extrapolating a free affine transform from
 // eyes/temples to the lips amplified small upper-face errors during head turns.
@@ -19,7 +20,7 @@ export function createLipStabilizer() {
   let previousFiltered: LipPoint[] | null = null;
   let previousTime = 0, previousWidth = 0, previousHeight = 0;
   function reset() { previousRaw = null; previousFiltered = null; previousTime = 0; }
-  function update(points: LipPoint[] | null, width: number, height: number, timeMs: number, imageCorrection?: { x: number; y: number } | null): LipPoint[] | null {
+  function update(points: LipPoint[] | null, width: number, height: number, timeMs: number, imageCorrection?: ImageLipCorrection | null): LipPoint[] | null {
     if (!points || ![...FACE, ...LIPS].every(i => valid(points[i]))) { reset(); return null; }
     const raw = points;
     const finish = (result: LipPoint[]) => {
@@ -60,8 +61,16 @@ export function createLipStabilizer() {
     for (const i of LIPS) predicted[i]=transform(previousFiltered[i]);
     // Mouth opening/closing is expression, not noise. Follow it immediately so
     // filtering does not leave the cavity closed over teeth or delay lip closure.
-    const distance = (ps: LipPoint[]) => Math.hypot((ps[13].x-ps[14].x)*width,(ps[13].y-ps[14].y)*height);
-    const expressionChange = Math.abs(distance(raw)-distance(predicted)) > mouthWidth*.012;
+    const distance = (ps: LipPoint[], a: number, b: number) => Math.hypot((ps[a].x-ps[b].x)*width,(ps[a].y-ps[b].y)*height);
+    const expressionThreshold=mouthWidth*.012;
+    const motion=imageCorrection?.motion;
+    const expressionChange = ([[13,14,"gap"],[61,291,"width"],[0,17,"height"]] as const).some(([a,b,kind]) => {
+      if(Math.abs(distance(raw,a,b)-distance(predicted,a,b))<=expressionThreshold)return false;
+      // A detector size fluctuation is not a smile/purse. When image patches
+      // match, require independent pixel movement before bypassing denoising.
+      const measured=motion?.[kind];
+      return measured===undefined||Math.abs(measured)>expressionThreshold*.5;
+    });
     const gain = (indices: number[]) => {
       const residuals=indices.map(i => Math.hypot((raw[i].x-predicted[i].x)*width,(raw[i].y-predicted[i].y)*height)).sort((a,b)=>a-b);
       // One noisy corner must not disable stabilization of the entire lip.

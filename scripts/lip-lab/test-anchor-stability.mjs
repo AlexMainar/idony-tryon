@@ -58,3 +58,31 @@ assert.deepEqual(expression.update(baseline,width,height,1000),baseline,'reset a
 const invalid=copy(baseline);invalid[0].x=NaN;
 assert.equal(expression.update(invalid,width,height,1033),null);
 console.log('Opening, closing, face loss, reacquisition, freeze and invalid data: passed');
+
+// Pursing and pressing closed lips must not be mistaken for detector noise.
+for(const expressionName of ['purse','press']) {
+ const tracker=createLipStabilizer();tracker.update(baseline,width,height,0);
+ const changed=copy(baseline);
+ if(expressionName==='purse')for(const id of lips)changed[id].x=.5+(changed[id].x-.5)*.94;
+ else {changed[0].y+=.012;changed[17].y-=.012;}
+ const actual=tracker.update(changed,width,height,33);
+ for(const id of lips)assert(Math.hypot((actual[id].x-changed[id].x)*width,(actual[id].y-changed[id].y)*height)<1e-6,expressionName+': expression must follow the current mouth');
+}
+console.log('Pursing and closed-lip compression follow the current frame.');
+
+// Size noise used to trigger the expression bypass on every frame. Pixel
+// evidence of a stationary mouth must keep residual denoising active.
+const breathing=createLipStabilizer();breathing.update(baseline,width,height,0);
+const rawBreathing=[],filteredBreathing=[];
+for(let frame=1;frame<=90;frame++){
+ const raw=copy(baseline),scale=1+(frame%2?.02:-.02);
+ for(const id of lips)raw[id].x=.5+(raw[id].x-.5)*scale;
+ const actual=breathing.update(raw,width,height,frame*1000/30,{x:0,y:0,motion:{width:0,height:0,gap:0}});
+ if(frame>10){rawBreathing.push((raw[61].x-baseline[61].x)*width);filteredBreathing.push((actual[61].x-baseline[61].x)*width);}
+}
+assert(rms(filteredBreathing)<rms(rawBreathing)*.6,'stationary pixels must suppress detector size noise');
+console.log('Image-confirmed size jitter RMS: '+rms(rawBreathing).toFixed(3)+'px → '+rms(filteredBreathing).toFixed(3)+'px');
+const realPurse=createLipStabilizer();realPurse.update(baseline,width,height,0);
+const pursed=copy(baseline);for(const id of lips)pursed[id].x=.5+(pursed[id].x-.5)*.94;
+const follow=realPurse.update(pursed,width,height,33,{x:0,y:0,motion:{width:-12,height:0,gap:0}});
+for(const id of lips)assert(Math.abs(follow[id].x-pursed[id].x)<1e-10,'image-confirmed expression follows immediately');

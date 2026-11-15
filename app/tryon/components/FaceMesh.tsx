@@ -8,9 +8,13 @@ import React, {
 } from "react";
 import type { FaceLandmarker } from "@mediapipe/tasks-vision";
 import productsCatalog from "@/data/products.json";
+import { selectFaceLandmarks } from "@/lib/face/selectFaceLandmarks";
 import { initFaceLandmarker } from "@/lib/face/detectLandmarks";
 import { applyTone, shouldUseDirectCheekDebugRender } from "@/lib/render/applyTone";
 import { createCameraFrameLoop } from "@/lib/render/mobile/cameraFrameLoop";
+import { createMobileLipTracker } from "@/lib/render/mobile/lipTracker";
+import { createMobileComplexionRenderer } from "@/lib/render/mobile/complexionRenderer";
+import { isMobileComplexionProduct } from "@/lib/render/mobile/applyMobileComplexionTone";
 import { createMobileLipOilRenderer, type MobileLipOilRenderer } from "@/lib/render/mobile/applyMobileLipOilTone";
 import {
   hexToRgba,
@@ -1128,7 +1132,6 @@ export default function FaceMeshComponent({
   const beautyFilterRef = useRef<BeautyFilter | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const landmarkerRef = useRef<FaceLandmarker | null>(null);
-  const landmarkerRunningModeRef = useRef<FaceLandmarkerRunningMode | null>(null);
   const sourceFrameCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const makeupBaseCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const freezeCompareRef = useRef<FreezeCompareState | null>(null);
@@ -1419,15 +1422,26 @@ export default function FaceMeshComponent({
     }
   }, [product, selectedVariant, activeVariantId, activeVariantTitle, isAwaitingVariantSync, patchUiState]);
 
+  const rendererKind = !productData ? null
+    : isLipBloomProduct(productData) ? "lip-oil"
+    : isEtherealProduct(productData) ? "ethereal"
+    : isMobileComplexionProduct(productData) ? "complexion"
+    : isLipGraceProduct(productData) ? "lipstick" : "canvas";
+
   useEffect(() => {
     if (etherealFixtureReplayEnabled) return;
-    if (!productData || !isStreamReady) return;
+    if (!rendererKind || !isStreamReady) return;
 
     let isMounted = true;
     let lipOilRenderer: MobileLipOilRenderer | undefined;
+    const lipstickTracker = rendererKind === "lipstick" ? createMobileLipTracker() : null;
     let etherealRenderer: EtherealRenderer | undefined;
+    let complexionRenderer: ReturnType<typeof createMobileComplexionRenderer> | undefined;
+    const drawTone = (...args: Parameters<typeof applyTone>) => complexionRenderer
+      ? complexionRenderer.draw(args[0], () => applyTone(...args))
+      : applyTone(...args);
     const etherealExposure = createEtherealExposure();
-    const preferImageLandmarker = true;
+    const preferImageLandmarker = rendererKind !== "lipstick" && rendererKind !== "lip-oil";
     let frameErrorReported = false;
     const frameLoop = createCameraFrameLoop({
       video: () => videoRef.current,
@@ -1463,7 +1477,9 @@ export default function FaceMeshComponent({
         sourceCanvas = document.createElement("canvas");
         sourceFrameCanvasRef.current = sourceCanvas;
       }
-      const sourceCtx = sourceCanvas.getContext("2d");
+      const sourceCtx = sourceCanvas.getContext("2d", {
+        willReadFrequently: rendererKind === "lipstick" || rendererKind === "lip-oil",
+      });
       if (!sourceCtx) {
         return;
       }
@@ -1511,7 +1527,9 @@ export default function FaceMeshComponent({
       } else {
         sourceCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
 
-        const detectionTimestampMs = frameTimestampMs ?? video.currentTime * 1000;
+        // The cached VIDEO model outlives a camera stream. A stream's media
+        // time restarts at zero on reopen; the inference clock must not.
+        const detectionTimestampMs = performance.now();
         const results = preferImageLandmarker
           ? landmarkerRef.current.detect(sourceCanvas)
           : landmarkerRef.current.detectForVideo(
@@ -1520,7 +1538,7 @@ export default function FaceMeshComponent({
           );
         if (!isMounted) return;
 
-        rawLandmarks = results.faceLandmarks?.[0] || null;
+        rawLandmarks = selectFaceLandmarks(results.faceLandmarks || [], stabilizedLandmarksRef.current);
         if (
           etherealFreezeCompareEnabled &&
           (!etherealCompareEnabled || compareCaptureRequestedRef.current) &&
@@ -1579,6 +1597,8 @@ export default function FaceMeshComponent({
 
       const trackedLandmarks = isLipBloom && lipOilRenderer
         ? lipOilRenderer.track(sourceCtx, sourceLandmarks, frameWidth, frameHeight, frameTimestampMs ?? video.currentTime * 1000)
+        : lipstickTracker
+        ? lipstickTracker.update(sourceCtx, sourceLandmarks, frameWidth, frameHeight, frameTimestampMs ?? video.currentTime * 1000)
         : sourceLandmarks
         ? hasLipRegions
           ? stabilizeLipLandmarks(
@@ -1591,7 +1611,7 @@ export default function FaceMeshComponent({
           : sourceLandmarks
         : null;
       const shouldStabilizeRenderGeometry =
-        !!trackedLandmarks && hasLipRegions && !isLipBloom;
+        !!trackedLandmarks && hasLipRegions && !isLipBloom && !lipstickTracker;
       const renderLipResult = shouldStabilizeRenderGeometry
         ? stabilizeLipRenderLandmarks(
           trackedLandmarks || sourceLandmarks,
@@ -1799,7 +1819,7 @@ export default function FaceMeshComponent({
       if (isEthereal && etherealRenderer) {
         // The Ethereal renderer owns camera + coating + one exposure transform.
         // Draw even without a face: camera presentation must continue on loss.
-        applyTone(makeupBaseCtx, rawLandmarks || [], currentProductData,
+        drawTone(makeupBaseCtx, rawLandmarks || [], currentProductData,
           frameWidth, frameHeight, hexToRgba, 1, undefined, {
             renderer: etherealRenderer, source: sourceCanvas,
             exposureGain: compareOriginalCamera ? 1 : exposureGain,
@@ -1847,13 +1867,13 @@ export default function FaceMeshComponent({
         const useDirectCheekDebug = shouldUseDirectCheekDebugRender(currentProductData);
 
         if (isLipBloom) {
-          applyTone(makeupBaseCtx, landmarks, currentProductData, frameWidth, frameHeight, hexToRgba, yawFade, lipOilRenderer);
+          drawTone(makeupBaseCtx, landmarks, currentProductData, frameWidth, frameHeight, hexToRgba, yawFade, lipOilRenderer);
         } else if (useDirectCheekDebug) {
           // Debug direct mode paints on the final canvas below.
         } else if (lipBandClipPath) {
           makeupBaseCtx.save();
           makeupBaseCtx.clip(lipBandClipPath);
-          applyTone(
+          drawTone(
             makeupBaseCtx,
             landmarks,
             currentProductData,
@@ -1864,7 +1884,7 @@ export default function FaceMeshComponent({
           );
           makeupBaseCtx.restore();
         } else {
-          applyTone(
+          drawTone(
             makeupBaseCtx,
             landmarks,
             currentProductData,
@@ -1888,7 +1908,7 @@ export default function FaceMeshComponent({
       ctx.imageSmoothingQuality = "high";
       ctx.drawImage(makeupBaseCanvas, 0, 0, frameWidth, frameHeight);
       if (rawLandmarks && currentProductData && shouldUseDirectCheekDebugRender(currentProductData)) {
-        applyTone(
+        drawTone(
           ctx,
           rawLandmarks,
           currentProductData,
@@ -1950,20 +1970,23 @@ export default function FaceMeshComponent({
         const desiredRunningMode: FaceLandmarkerRunningMode = preferImageLandmarker
           ? "IMAGE"
           : "VIDEO";
-        if (
-          !landmarkerRef.current ||
-          landmarkerRunningModeRef.current !== desiredRunningMode
-        ) {
-          landmarkerRef.current = await initFaceLandmarker(desiredRunningMode);
-          landmarkerRunningModeRef.current = desiredRunningMode;
+        const detector = await initFaceLandmarker(
+          desiredRunningMode, preferImageLandmarker ? "face" : "lips"
+        );
+        if (!isMounted) return;
+        if (landmarkerRef.current !== detector) {
+          landmarkerRef.current = detector;
           lastVideoTimeRef.current = -1;
           resetLipRuntimeState();
         }
         if (!isMounted) return;
-        if (isEtherealProduct(productData)) {
+        if (rendererKind === "ethereal") {
           etherealRenderer = createEtherealRenderer(ETHEREAL_LIVE_MATERIAL);
         }
-        if (isLipBloomProduct(productData)) {
+        if (rendererKind === "complexion") {
+          complexionRenderer = createMobileComplexionRenderer();
+        }
+        if (rendererKind === "lip-oil") {
           const prepared = await createMobileLipOilRenderer();
           if (!isMounted) { prepared.dispose(); return; }
           lipOilRenderer = prepared;
@@ -1984,7 +2007,9 @@ export default function FaceMeshComponent({
     return () => {
       isMounted = false;
       lipOilRenderer?.dispose();
+      lipstickTracker?.reset();
       etherealRenderer?.dispose();
+      complexionRenderer?.dispose();
       frameLoop.stop();
     };
   }, [
@@ -1994,7 +2019,9 @@ export default function FaceMeshComponent({
     etherealFixtureReplayEnabled,
     isStreamReady,
     lipDebugShowContours,
-    productData,
+    // A shade changes material colour through productDataRef. It must not
+    // recreate the camera loop, optical anchor or Three context.
+    rendererKind,
     resetLipRuntimeState,
   ]);
 

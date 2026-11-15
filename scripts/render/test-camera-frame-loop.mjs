@@ -25,3 +25,24 @@ late(time,{mediaTime:1.2});assert.equal(draws,4,'unmounted sessions cannot draw'
 frozen=true;loop.start();assert.equal(frames.size,0);tick();assert.equal(draws,5);
 loop.stop();assert.equal(raf.size,0);
 console.log('PASS: one bounded mobile frame loop, video timestamps, stalled-callback fallback, exception recovery and session cleanup.');
+
+// Native metadata can lag behind the image already drawn by the watchdog.
+// Both paths must use the same video clock and advance the anchor once/image.
+const times=[];let decoded=1;
+video.currentTime=2;
+video.getVideoPlaybackQuality=()=>({totalVideoFrames:decoded});
+frozen=false;
+const tracked=createCameraFrameLoop({video:()=>video,frozen:()=>frozen,draw:t=>times.push(Math.round(t)),onError:e=>{throw e;}},clock);
+tracked.start();
+let callback=frames.values().next().value;frames.clear();callback(time,{mediaTime:1.967});
+assert.deepEqual(times,[2000]);
+tick();tick();assert.equal(times.length,1,'watchdog must skip the same decoded image');
+video.currentTime=2.034;decoded++;
+tick();tick();assert.deepEqual(times,[2000,2034]);
+callback=frames.values().next().value;frames.clear();callback(time,{mediaTime:2});
+assert.equal(times.length,2,'late native metadata must not reset the lip anchor');
+video.currentTime=2.067;decoded++;
+callback=frames.values().next().value;frames.clear();callback(time,{mediaTime:2.034});
+assert.deepEqual(times,[2000,2034,2067]);
+tracked.stop();assert.equal(raf.size,0);assert.equal(frames.size,0);
+console.log('PASS: lip tracking advances once per decoded image on a single camera clock.');

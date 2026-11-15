@@ -12,13 +12,16 @@ try {
   globalThis.landmarkerMock={resolve:async()=>({}),create:async options=>{calls.push(options);await Promise.resolve();if(gpuFails&&options.baseOptions.delegate==='GPU')throw Error('GPU unsupported');return instance;}};
   const mock=encode('export const FilesetResolver={forVisionTasks:()=>globalThis.landmarkerMock.resolve()};export const FaceLandmarker={createFromOptions:(_,options)=>globalThis.landmarkerMock.create(options)};');
   const {initFaceLandmarker}=await import(encode(source.replace(/from "@mediapipe\/tasks-vision"/,`from ${JSON.stringify(mock)}`)+'\n// scenario '+gpuFails));
-  const [preload,camera]=await Promise.all([initFaceLandmarker('IMAGE'),initFaceLandmarker('IMAGE')]);
-  assert.equal(preload,camera);assert.equal(camera,instance);
-  assert.equal(calls.length,gpuFails?2:1,'preload/camera must share a single initialization');
-  assert.equal(calls[0].baseOptions.delegate,'GPU');
-  if(gpuFails)assert.equal(calls[1].baseOptions.delegate,'CPU');
-  for(const options of calls){assert.equal(options.runningMode,'IMAGE');assert.equal(options.minTrackingConfidence,.95);assert.equal(options.numFaces,1);}
-  await initFaceLandmarker('IMAGE');assert.equal(calls.length,gpuFails?2:1,'reuse successful model');
+  for(const [mode,profile,numFaces] of [['IMAGE','face',1],['VIDEO','face',1],['VIDEO','lips',2]]){
+   const start=calls.length;
+   const [preload,camera]=await Promise.all([initFaceLandmarker(mode,profile),initFaceLandmarker(mode,profile)]);
+   assert.equal(preload,camera);assert.equal(camera,instance);
+   assert.equal(calls.length-start,gpuFails?2:1,'preload/camera must share a single initialization');
+   assert.equal(calls[start].baseOptions.delegate,'GPU');
+   if(gpuFails)assert.equal(calls[start+1].baseOptions.delegate,'CPU');
+   for(const options of calls.slice(start)){assert.equal(options.runningMode,mode);assert.equal(options.minTrackingConfidence,.95);assert.equal(options.numFaces,numFaces);}
+   await initFaceLandmarker(mode,profile);assert.equal(calls.length-start,gpuFails?2:1,'reuse successful model on camera reopen');
+  }
  }
 } finally {Object.assign(console,original);delete globalThis.landmarkerMock;}
-console.log('PASS: shared cold initialization, GPU inference with CPU compatibility fallback, approved detection mode and thresholds preserved.');
+console.log('PASS: shared IMAGE/VIDEO initialization, GPU/CPU compatibility, raw lip tracking without native smoothing, identity isolation and camera reopen.');

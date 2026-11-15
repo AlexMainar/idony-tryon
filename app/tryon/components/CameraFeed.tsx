@@ -103,7 +103,7 @@ export default function CameraFeed({
     const effectiveClassName = [
         baseClassName,
         className, // from FaceMesh
-        showRawFeed ? "block" : "hidden pointer-events-none",
+        showRawFeed ? "block" : "opacity-0 pointer-events-none",
     ]
         .filter(Boolean)
         .join(" ");
